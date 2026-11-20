@@ -1803,7 +1803,7 @@
                 "name": "Verdichtersauggastemp"
             },
             "heat_pump_precise_flow_temperature": {
-                "name": "Vorlauftemperatur pr\u00e4zise(Summenvorlauf(B7))"
+                "name": "Vorlauftemperatur pr\u00e4zise (Summenvorlauf (B7))"
             },
             "heat_pump_flow_temperature": {
                 "name": "Vorlauftemperatur"
