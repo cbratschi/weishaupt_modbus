@@ -32,6 +32,7 @@ _LOGGER = logging.getLogger(__name__)
 _ROOT = "/settings_export.html"
 WSB_REQUEST_DELAY_SECONDS = 1.0
 _EXPORT_LINK = re.compile(r"/settings_export\.html\?stack=[0-9a-fA-F,]+")
+_CONTROLLER_FIRMWARE = re.compile(r"\bWWP-CPU COM V(\d+\.\d+) Rev\.\s*(\d+)\b")
 
 
 @dataclass(frozen=True)
@@ -133,6 +134,7 @@ class WsbWebifCoordinator(DataUpdateCoordinator[dict[str, int]]):
         )
         self.api = api
         self.mcu_lock = mcu_lock
+        self.controller_firmware: str | None = None
 
     async def _get_page(self, path: str) -> BeautifulSoup:
         if self.api is None:
@@ -155,6 +157,8 @@ class WsbWebifCoordinator(DataUpdateCoordinator[dict[str, int]]):
             except (TimeoutError, ValueError, WeishauptWebifError) as err:
                 _LOGGER.debug("WSB WEM root unavailable (%s)", type(err).__name__)
                 return values
+            if match := _CONTROLLER_FIRMWARE.search(root.get_text(" ", strip=True)):
+                self.controller_firmware = f"WWP-CPU COM V{match[1]} R{match[2]}"
             for first, second, parse in (
                 ("Wärmepumpe", "Pumpe", _pump_values),
                 ("Info", "2. WEZ", _hour_values),

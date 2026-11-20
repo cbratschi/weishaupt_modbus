@@ -6,6 +6,7 @@ import logging
 from homeassistant.components.modbus.connection import ModbusTcpParams, async_get_unit
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import device_registry as dr
 
 from .configentry import MyConfigEntry, MyData, entity_identity
 from .const import CONF, CONST
@@ -129,6 +130,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: MyConfigEntry) -> bool:
                 CONF.UID_MIGRATION: True,
             },
         )
+
+    if wsb_coordinator is not None:
+        registry = dr.async_get(hass)
+        for device_entry in dr.async_entries_for_config_entry(registry, entry.entry_id):
+            updates = {}
+            if device_entry.sw_version == "Device_SW_Version":
+                updates["sw_version"] = wsb_coordinator.controller_firmware
+            if device_entry.model == "Device_model":
+                updates["model"] = None
+            if updates:
+                registry.async_update_device(device_entry.id, **updates)
 
     # see https://community.home-assistant.io/t/config-flow-how-to-update-an-existing-entity/522442/8
     entry.async_on_unload(entry.add_update_listener(update_listener))

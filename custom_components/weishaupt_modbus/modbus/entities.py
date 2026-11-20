@@ -9,7 +9,7 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from ..configentry import MyConfigEntry, entity_identity
-from ..const import CONST
+from ..const import CONF, CONST
 from .coordinator import WeishauptCoordinator
 from .descriptions.description import (
     EntityDescription,
@@ -62,16 +62,23 @@ class WeishauptEntity(CoordinatorEntity[WeishauptCoordinator]):
     def device_info(self) -> DeviceInfo:
         """Return device info."""
         report_name = self.description.report_name
+        entry = self._weishaupt_config_entry
+        webif = (
+            entry.runtime_data.wsb_coordinator
+            if entry.data.get(CONF.WSB_READ_ONLY)
+            else None
+        )
 
-        return DeviceInfo(
+        info = DeviceInfo(
             identifiers={
                 (CONST.DOMAIN, f"{self._mac}_{report_name}"),
             },
             translation_key=f"dev_{report_name}",
-            sw_version="Device_SW_Version",
-            model="Device_model",
             manufacturer="Weishaupt",
         )
+        if webif is not None and webif.controller_firmware is not None:
+            info["sw_version"] = webif.controller_firmware
+        return info
 
 
 class WeishauptSensor(WeishauptEntity, SensorEntity):

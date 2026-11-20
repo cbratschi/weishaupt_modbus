@@ -1027,7 +1027,7 @@
                 "name": "Adr. 36801"
             },
             "heat_pump_regenerative_flow_temperature": {
-                "name": "Anforderung(Vorlauf regenerativ)"
+                "name": "Anforderung (Vorlauf regenerativ)"
             },
             "io_sensor_input_output_h1_2": {
                 "name": "Ausgang H1.2"

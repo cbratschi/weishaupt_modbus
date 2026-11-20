@@ -71,7 +71,5 @@ class WebifSensor(CoordinatorEntity[WeishauptWebifCoordinator], SensorEntity):
                 (CONST.DOMAIN, f"{self._mac}_webif_{report_name}"),
             },
             translation_key=f"dev_webif_{report_name}",
-            sw_version="Device_SW_Version",
-            model="Device_model",
             manufacturer="Weishaupt",
         )
