@@ -82,6 +82,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: MyConfigEntry) -> bool:
         readings.append("heating_circuit4")
     if entry.data.get(CONF.HK5, False) is True:
         readings.append("heating_circuit5")
+    if wsb_read_only:
+        readings.extend(
+            ("wsb_system_settings", "wsb_heating_circuit_settings", "wsb_hot_water_settings")
+        )
 
     params = ModbusTcpParams(
         host=entry.data[CONF.HOST],

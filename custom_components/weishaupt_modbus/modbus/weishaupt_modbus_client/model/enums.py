@@ -184,7 +184,11 @@ class SysOperatingDisplay(IntEnum):
     LOWERING = 35
     REGENERATIVE_FLOW = 36
     HEATING_SGR = 37
+    COOLING_SGR3 = 38
     HOT_WATER_SGR = 39
+    HEATING_SGR4 = 40
+    COOLING_SGR4 = 41
+    HOT_WATER_SGR4 = 42
     OIL_RECIRCULATION = 43
 
 
@@ -200,7 +204,7 @@ class SysOperatingMode(IntEnum):
 
 
 class HeatPumpOperation(IntEnum):
-    """System operating mode values (register 40001)."""
+    """Heat pump operating status values (input register 33101)."""
 
     UNDEFINED = 0
     RELAY_TEST = 1
@@ -240,7 +244,11 @@ class HeatPumpOperation(IntEnum):
     LOWERING = 35
     READINESS = 36
     HEATING_SGR = 37
+    COOLING_SGR3 = 38
     HOT_WATER_SGR = 39
+    HEATING_SGR4 = 40
+    COOLING_SGR4 = 41
+    HOT_WATER_SGR4 = 42
     OIL_RECIRCULATION = 43
 
 

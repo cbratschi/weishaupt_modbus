@@ -39,5 +39,5 @@ class SystemConfig(WeishauptComponent):
     operating_mode = enum(40001, SysOperatingMode, writable=True)
     """System operating mode."""
 
-    pv_setpoint = integer(40002, unit="W", writable=True)
+    pv_setpoint = integer(40002, signed=False, unit="W", writable=True)
     """PV setpoint in watts."""

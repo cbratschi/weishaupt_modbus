@@ -17,10 +17,10 @@ class WsbIOInput(WeishauptComponent):
     """SG-Ready input 2."""
 
     output_h1_2 = integer(35103)
-    """H1.2 output status."""
+    """H1.2 FormatSensor input."""
 
     output_h1_3 = integer(35104)
-    """H1.3 output status."""
+    """H1.3 FormatSensor input."""
 
     input_de1 = gauge(
         35107,
@@ -38,13 +38,13 @@ class WsbIOInput(WeishauptComponent):
 
 
 class IOInput(WsbIOInput):
-    """Weishaupt IO inputs including optional outputs H1.4 and H1.5."""
+    """Weishaupt IO inputs including optional inputs H1.4 and H1.5."""
 
     output_h1_4 = integer(35105)
-    """H1.4 output status."""
+    """H1.4 FormatSensor input."""
 
     output_h1_5 = integer(35106)
-    """H1.5 output status."""
+    """H1.5 FormatSensor input."""
 
 
 class IOConfig(WeishauptComponent):

@@ -161,6 +161,10 @@ class Weishaupt(Device):
         )
 
         if wsb_read_only:
+            # Keep configuration reads independent of measured values.
+            self.wsb_system_settings = self.system_config
+            self.wsb_heating_circuit_settings = self.heating_circuit_config
+            self.wsb_hot_water_settings = self.domestic_hot_water_config
             self.system = self.system_input
             self.heat_pump = self.heat_pump_input
             self.heating_circuit = self.heating_circuit_input

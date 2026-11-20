@@ -1030,16 +1030,16 @@
                 "name": "Vraag (regeneratieve stroom)"
             },
             "io_sensor_input_output_h1_2": {
-                "name": "Uitgang H1.2"
+                "name": "Ingang H1.2"
             },
             "io_sensor_output_h1_3": {
-                "name": "Uitgang H1.3"
+                "name": "Ingang H1.3"
             },
             "io_sensor_output_h1_4": {
-                "name": "Uitgang H1.4"
+                "name": "Ingang H1.4"
             },
             "io_sensor_output_h1_5": {
-                "name": "Uitgang H1.5"
+                "name": "Ingang H1.5"
             },
             "webif_heating_circuit_outside_temperature": {
                 "name": "Buitentemperatuur"
@@ -1373,7 +1373,11 @@
                     "system_operating_display_35": "Verlaagd bedrijf",
                     "system_operating_display_36": "Aanvoer regeneratief",
                     "system_operating_display_37": "Verwarmingsbedrijf SGR",
+                    "system_operating_display_38": "Koelbedrijf SGR3",
                     "system_operating_display_39": "Warmwaterbedrijf SGR",
+                    "system_operating_display_40": "Verwarmingsbedrijf SGR4",
+                    "system_operating_display_41": "Koelbedrijf SGR4",
+                    "system_operating_display_42": "Warmwaterbedrijf SGR4",
                     "system_operating_display_43": "Olieterugvoer"
                 }
             },
@@ -1607,7 +1611,7 @@
                 "name": "Aanvoertemperatuur 5"
             },
             "heating_circuit_flow_target_temperature": {
-                "name": "Gewenste aanvoertemperatuur"
+                "name": "Aanvoertemperatuur setpunt"
             },
             "heating_circuit2_flow_target_temperature": {
                 "name": "Gewenste aanvoertemperatuur 2"
@@ -1804,7 +1808,7 @@
                 "name": "Aanvoertemperatuur"
             },
             "heat_pump_thermal_power": {
-                "name": "Thermisch vermogen"
+                "name": "Geschat thermisch vermogen (prestatiekaart)"
             },
             "system_warning": {
                 "name": "Waarschuwing",
@@ -1989,7 +1993,11 @@
                     "heat_pump_operation_35": "Verlaagd bedrijf",
                     "heat_pump_operation_36": "Stand-by",
                     "heat_pump_operation_37": "Verwarmingsbedrijf SGR",
+                    "heat_pump_operation_38": "Koelbedrijf SGR3",
                     "heat_pump_operation_39": "Warmwaterbedrijf SGR",
+                    "heat_pump_operation_40": "Verwarmingsbedrijf SGR4",
+                    "heat_pump_operation_41": "Koelbedrijf SGR4",
+                    "heat_pump_operation_42": "Warmwaterbedrijf SGR4",
                     "heat_pump_operation_43": "Olieterugvoer"
                 }
             },
@@ -2001,7 +2009,7 @@
                 }
             },
             "statistics_daily_cop": {
-                "name": "Dagelijkse prestatiefactor vandaag"
+                "name": "Dag-COP vandaag"
             },
             "heat_pump_temperature_spread": {
                 "name": "Spreiding"
@@ -2032,6 +2040,98 @@
             },
             "domestic_hot_water_temperature": {
                 "name": "Warmwatertemperatuur"
+            },
+            "system_pv_setpoint": {
+                "name": "PV-vermogenssetpunt"
+            },
+            "heating_circuit_comfort_room_target_temperature": {
+                "name": "Gewenste kamertemperatuur comfort"
+            },
+            "heating_circuit_normal_room_target_temperature": {
+                "name": "Gewenste kamertemperatuur normaal"
+            },
+            "heating_circuit_lowering_room_target_temperature": {
+                "name": "Gewenste kamertemperatuur verlaging"
+            },
+            "heating_circuit_heating_curve": {
+                "name": "Stooklijn (helling)"
+            },
+            "heating_circuit_summer_winter_switch_temperature": {
+                "name": "Zomer/winter omschakeling"
+            },
+            "heating_circuit_constant_heating_temperature": {
+                "name": "Verwarmen constante temperatuur"
+            },
+            "heating_circuit_constant_heating_lowering_temperature": {
+                "name": "Verwarmen constante nachttemperatuur"
+            },
+            "heating_circuit_constant_cooling_temperature": {
+                "name": "Koelen constante temperatuur"
+            },
+            "domestic_hot_water_normal_temperature": {
+                "name": "Warm water normaal"
+            },
+            "domestic_hot_water_lowering_temperature": {
+                "name": "Warm water verlaging"
+            },
+            "system_operating_mode": {
+                "name": "Systeem bedrijfsmodus",
+                "state": {
+                    "system_operating_mode_second_heat_source": "2e warmtebron",
+                    "system_operating_mode_automatic": "Automatisch",
+                    "system_operating_mode_heating": "Verwarmen",
+                    "system_operating_mode_cooling": "Koelen",
+                    "system_operating_mode_summer": "Zomer",
+                    "system_operating_mode_standby": "Stand-by"
+                }
+            },
+            "heating_circuit_operation_mode": {
+                "name": "Bedrijfsmodus",
+                "state": {
+                    "heating_circuit_operation_mode_lowering": "Verlaagd bedrijf",
+                    "heating_circuit_operation_mode_automatic": "Automatisch",
+                    "heating_circuit_operation_mode_normal": "Normaal",
+                    "heating_circuit_operation_mode_standby": "Stand-by",
+                    "heating_circuit_operation_mode_comfort": "Comfort"
+                }
+            },
+            "domestic_hot_water_push_minutes": {
+                "name": "Timer warmwaterboost"
+            },
+            "heat_pump_pump_regulation_heating": {
+                "name": "Pompregeling verwarmen",
+                "state": {
+                    "constant_speed": "Constant bedrijf",
+                    "flow_rate": "Debiet"
+                }
+            },
+            "heat_pump_pump_regulation_hot_water": {
+                "name": "Pompregeling warm water",
+                "state": {
+                    "constant_speed": "Constant bedrijf",
+                    "flow_rate": "Debiet"
+                }
+            },
+            "heat_pump_pump_regulation_cooling": {
+                "name": "Pompregeling koelen",
+                "state": {
+                    "constant_speed": "Constant bedrijf",
+                    "flow_rate": "Debiet"
+                }
+            },
+            "heat_pump_pump_function": {
+                "name": "Functie circulatiepomp",
+                "state": {
+                    "feed_pump": "Voedingspomp",
+                    "heating_circuit_pump": "Verwarmingscircuitpomp"
+                }
+            },
+            "heat_pump_pump_utility_lock_release": {
+                "name": "Pompvrijgave tijdens netblokkering",
+                "state": {
+                    "off": "Uit",
+                    "on": "Aan"
+                }
             }
         }
     },

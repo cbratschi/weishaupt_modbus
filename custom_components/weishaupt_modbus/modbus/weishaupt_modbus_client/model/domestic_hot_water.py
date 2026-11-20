@@ -3,7 +3,6 @@
 from modbus_connection.model import gauge, integer
 
 from .component import WeishauptComponent
-
 from .register_values import sensor_temperature
 
 
@@ -16,7 +15,7 @@ class DomesticHotWaterInput(WeishauptComponent):
         32101,
         0.1,
         unit="°C",
-        nan=32768,
+        nan=(1, 32768),
     )
 
     temperature = sensor_temperature(32102)

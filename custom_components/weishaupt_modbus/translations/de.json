@@ -1030,16 +1030,16 @@
                 "name": "Anforderung (Vorlauf regenerativ)"
             },
             "io_sensor_input_output_h1_2": {
-                "name": "Ausgang H1.2"
+                "name": "Eingang H1.2"
             },
             "io_sensor_output_h1_3": {
-                "name": "Ausgang H1.3"
+                "name": "Eingang H1.3"
             },
             "io_sensor_output_h1_4": {
-                "name": "Ausgang H1.4"
+                "name": "Eingang H1.4"
             },
             "io_sensor_output_h1_5": {
-                "name": "Ausgang H1.5"
+                "name": "Eingang H1.5"
             },
             "webif_heating_circuit_outside_temperature": {
                 "name": "Außentemperatur"
@@ -1341,7 +1341,7 @@
                     "system_operating_display_3": "Diagnose",
                     "system_operating_display_4": "Handbetrieb",
                     "system_operating_display_5": "Handbetrieb Heizen",
-                    "system_operating_display_6": "Handbetrieb Kühlen",
+                    "system_operating_display_6": "Handbetrieb K\u00fchlen",
                     "system_operating_display_7": "Manueller Abtaubetrieb",
                     "system_operating_display_8": "Abtauen",
                     "system_operating_display_9": "2. WEZ",
@@ -1349,17 +1349,17 @@
                     "system_operating_display_11": "SG Tarif",
                     "system_operating_display_12": "SG Maximal",
                     "system_operating_display_13": "Tarifladung",
-                    "system_operating_display_14": "Erhöhter Betrieb",
+                    "system_operating_display_14": "Erh\u00f6hter Betrieb",
                     "system_operating_display_15": "Standzeit",
                     "system_operating_display_16": "Standby",
-                    "system_operating_display_17": "Spülen",
+                    "system_operating_display_17": "Sp\u00fclen",
                     "system_operating_display_18": "Frostschutz",
                     "system_operating_display_19": "Heizbetrieb",
                     "system_operating_display_20": "Warmwasserbetrieb",
                     "system_operating_display_21": "Legionellenschutz",
                     "system_operating_display_22": "Umschaltung HZ KU",
-                    "system_operating_display_23": "Kühlbetrieb",
-                    "system_operating_display_24": "Passive Kühlung",
+                    "system_operating_display_23": "K\u00fchlbetrieb",
+                    "system_operating_display_24": "Passive K\u00fchlung",
                     "system_operating_display_25": "Sommerbetrieb",
                     "system_operating_display_26": "Schwimmbadbetrieb",
                     "system_operating_display_27": "Urlaub",
@@ -1373,8 +1373,12 @@
                     "system_operating_display_35": "Absenkbetrieb",
                     "system_operating_display_36": "Vorlauf regenerativ",
                     "system_operating_display_37": "Heizbetrieb SGR",
+                    "system_operating_display_38": "K\u00fchlbetrieb SGR3",
                     "system_operating_display_39": "Warmwasserbetrieb SGR",
-                    "system_operating_display_43": "Ölrückführung"
+                    "system_operating_display_40": "Heizbetrieb SGR4",
+                    "system_operating_display_41": "K\u00fchlbetrieb SGR4",
+                    "system_operating_display_42": "Warmwasserbetrieb SGR4",
+                    "system_operating_display_43": "\u00d6lr\u00fcckf\u00fchrung"
                 }
             },
             "second_heat_source_electric_heater_1_operating_hours": {
@@ -1592,7 +1596,7 @@
                 "name": "Heizen Energie Monat"
             },
             "heating_circuit_flow_temperature": {
-                "name": "HZ_Vorlauftemperatur"
+                "name": "Vorlauftemperatur"
             },
             "heating_circuit2_flow_temperature": {
                 "name": "HZ_Vorlauftemperatur2"
@@ -1607,7 +1611,7 @@
                 "name": "HZ_Vorlauftemperatur5"
             },
             "heating_circuit_flow_target_temperature": {
-                "name": "HZ_Vorlaufsolltemperatur"
+                "name": "Vorlaufsolltemperatur"
             },
             "heating_circuit2_flow_target_temperature": {
                 "name": "HZ_Vorlaufsolltemperatur2"
@@ -1782,8 +1786,8 @@
                 "name": "Status E-Heizung 1",
                 "state": {
                     "second_heat_source_electric_heater_1_status_0": "aus",
-                    "w2_status_aus": "aus",
-                    "w2_status_ein": "ein",
+                    "w2_status_aus": "Aus",
+                    "w2_status_ein": "Ein",
                     "second_heat_source_electric_heater_1_status_1": "ein"
                 }
             },
@@ -1791,8 +1795,8 @@
                 "name": "Status E-Heizung 2",
                 "state": {
                     "second_heat_source_electric_heater_2_status_0": "aus",
-                    "w2_status_aus": "aus",
-                    "w2_status_ein": "ein",
+                    "w2_status_aus": "Aus",
+                    "w2_status_ein": "Ein",
                     "second_heat_source_electric_heater_2_status_1": "ein"
                 }
             },
@@ -1809,7 +1813,7 @@
                 "name": "Vorlauftemperatur"
             },
             "heat_pump_thermal_power": {
-                "name": "W\u00e4rmeleistung"
+                "name": "Gesch\u00e4tzte W\u00e4rmeleistung (Kennfeld)"
             },
             "system_warning": {
                 "name": "Warnung",
@@ -1962,7 +1966,7 @@
                     "heat_pump_operation_3": "Diagnose",
                     "heat_pump_operation_4": "Handbetrieb",
                     "heat_pump_operation_5": "Handbetrieb Heizen",
-                    "heat_pump_operation_6": "Handbetrieb Kühlen",
+                    "heat_pump_operation_6": "Handbetrieb K\u00fchlen",
                     "heat_pump_operation_7": "Manueller Abtaubetrieb",
                     "heat_pump_operation_8": "Abtauen",
                     "heat_pump_operation_9": "WEZ2",
@@ -1970,17 +1974,17 @@
                     "heat_pump_operation_11": "SG Tarif",
                     "heat_pump_operation_12": "SG Maximal",
                     "heat_pump_operation_13": "Tarifladung",
-                    "heat_pump_operation_14": "Erhöhter Betrieb",
+                    "heat_pump_operation_14": "Erh\u00f6hter Betrieb",
                     "heat_pump_operation_15": "Standzeit",
                     "heat_pump_operation_16": "Standbybetrieb",
-                    "heat_pump_operation_17": "Spülbetrieb",
+                    "heat_pump_operation_17": "Sp\u00fclbetrieb",
                     "heat_pump_operation_18": "Frostschutz",
                     "heat_pump_operation_19": "Heizbetrieb",
                     "heat_pump_operation_20": "Warmwasserbetrieb",
                     "heat_pump_operation_21": "Legionellenschutz",
                     "heat_pump_operation_22": "Umschaltung HZ KU",
-                    "heat_pump_operation_23": "Kühlbetrieb",
-                    "heat_pump_operation_24": "Passive Kühlung",
+                    "heat_pump_operation_23": "K\u00fchlbetrieb",
+                    "heat_pump_operation_24": "Passive K\u00fchlung",
                     "heat_pump_operation_25": "Sommerbetrieb",
                     "heat_pump_operation_26": "Schwimmbad",
                     "heat_pump_operation_27": "Urlaub",
@@ -1994,8 +1998,12 @@
                     "heat_pump_operation_35": "Absenk",
                     "heat_pump_operation_36": "BEREITSCHAFT",
                     "heat_pump_operation_37": "Heizbetrieb SGR",
+                    "heat_pump_operation_38": "K\u00fchlbetrieb SGR3",
                     "heat_pump_operation_39": "Warmwasserbetrieb SGR",
-                    "heat_pump_operation_43": "Ölrückführung"
+                    "heat_pump_operation_40": "Heizbetrieb SGR4",
+                    "heat_pump_operation_41": "K\u00fchlbetrieb SGR4",
+                    "heat_pump_operation_42": "Warmwasserbetrieb SGR4",
+                    "heat_pump_operation_43": "\u00d6lr\u00fcckf\u00fchrung"
                 }
             },
             "heat_pump_fault": {
@@ -2006,7 +2014,7 @@
                 }
             },
             "statistics_daily_cop": {
-                "name": "Tagesarbeitszahl"
+                "name": "Tagesarbeitszahl heute"
             },
             "heat_pump_temperature_spread": {
                 "name": "Spreizung"
@@ -2037,6 +2045,98 @@
             },
             "domestic_hot_water_temperature": {
                 "name": "Warmwassertemperatur"
+            },
+            "system_pv_setpoint": {
+                "name": "PV-Sollwert"
+            },
+            "heating_circuit_comfort_room_target_temperature": {
+                "name": "Raumsolltemperatur Komfort"
+            },
+            "heating_circuit_normal_room_target_temperature": {
+                "name": "Raumsolltemperatur Normal"
+            },
+            "heating_circuit_lowering_room_target_temperature": {
+                "name": "Raumsolltemperatur Absenk"
+            },
+            "heating_circuit_heating_curve": {
+                "name": "Heizkennlinie (Steilheit)"
+            },
+            "heating_circuit_summer_winter_switch_temperature": {
+                "name": "Sommer Winter Umschaltung"
+            },
+            "heating_circuit_constant_heating_temperature": {
+                "name": "Heizen Konstanttemperatur"
+            },
+            "heating_circuit_constant_heating_lowering_temperature": {
+                "name": "Heizen Konstanttemperatur Absenk"
+            },
+            "heating_circuit_constant_cooling_temperature": {
+                "name": "K\u00fchlen Konstanttemperatur"
+            },
+            "domestic_hot_water_normal_temperature": {
+                "name": "Warmwasser Normal"
+            },
+            "domestic_hot_water_lowering_temperature": {
+                "name": "Warmwasser Absenk"
+            },
+            "system_operating_mode": {
+                "name": "Systembetriebsart",
+                "state": {
+                    "system_operating_mode_second_heat_source": "2.WEZ",
+                    "system_operating_mode_automatic": "Automatik",
+                    "system_operating_mode_heating": "Heizen",
+                    "system_operating_mode_cooling": "K\u00fchlen",
+                    "system_operating_mode_summer": "Sommer",
+                    "system_operating_mode_standby": "Standby"
+                }
+            },
+            "heating_circuit_operation_mode": {
+                "name": "Betriebsart",
+                "state": {
+                    "heating_circuit_operation_mode_lowering": "Absenkbetrieb",
+                    "heating_circuit_operation_mode_automatic": "Automatik",
+                    "heating_circuit_operation_mode_normal": "Normal",
+                    "heating_circuit_operation_mode_standby": "Standby",
+                    "heating_circuit_operation_mode_comfort": "Komfort"
+                }
+            },
+            "domestic_hot_water_push_minutes": {
+                "name": "Warmwasser-Push Timer"
+            },
+            "heat_pump_pump_regulation_heating": {
+                "name": "Pumpenregelung Heizen",
+                "state": {
+                    "constant_speed": "Konstantbetrieb",
+                    "flow_rate": "Volumenstrom"
+                }
+            },
+            "heat_pump_pump_regulation_hot_water": {
+                "name": "Pumpenregelung Warmwasser",
+                "state": {
+                    "constant_speed": "Konstantbetrieb",
+                    "flow_rate": "Volumenstrom"
+                }
+            },
+            "heat_pump_pump_regulation_cooling": {
+                "name": "Pumpenregelung K\u00fchlen",
+                "state": {
+                    "constant_speed": "Konstantbetrieb",
+                    "flow_rate": "Volumenstrom"
+                }
+            },
+            "heat_pump_pump_function": {
+                "name": "Funktion Umw\u00e4lzpumpe",
+                "state": {
+                    "feed_pump": "Zubringerpumpe",
+                    "heating_circuit_pump": "Heizkreispumpe"
+                }
+            },
+            "heat_pump_pump_utility_lock_release": {
+                "name": "Pumpenfreigabe bei EVU-Sperre",
+                "state": {
+                    "off": "Aus",
+                    "on": "Ein"
+                }
             }
         }
     },

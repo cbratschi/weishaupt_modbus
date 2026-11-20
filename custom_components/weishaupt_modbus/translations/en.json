@@ -1030,16 +1030,16 @@
                 "name": "Demand (regenerative flow)"
             },
             "io_sensor_input_output_h1_2": {
-                "name": "Output H1.2"
+                "name": "Input H1.2"
             },
             "io_sensor_output_h1_3": {
-                "name": "Output H1.3"
+                "name": "Input H1.3"
             },
             "io_sensor_output_h1_4": {
-                "name": "Output H1.4"
+                "name": "Input H1.4"
             },
             "io_sensor_output_h1_5": {
-                "name": "Output H1.5"
+                "name": "Input H1.5"
             },
             "webif_heating_circuit_outside_temperature": {
                 "name": "Outside temperature"
@@ -1373,7 +1373,11 @@
                     "system_operating_display_35": "Setback mode",
                     "system_operating_display_36": "Regenerative flow",
                     "system_operating_display_37": "Heating mode SGR",
+                    "system_operating_display_38": "Cooling mode SGR3",
                     "system_operating_display_39": "Hot water mode SGR",
+                    "system_operating_display_40": "Heating mode SGR4",
+                    "system_operating_display_41": "Cooling mode SGR4",
+                    "system_operating_display_42": "Hot water mode SGR4",
                     "system_operating_display_43": "Oil recirculation"
                 }
             },
@@ -1607,7 +1611,7 @@
                 "name": "Flow temperature 5"
             },
             "heating_circuit_flow_target_temperature": {
-                "name": "Target flow temperature"
+                "name": "Flow temperature setpoint"
             },
             "heating_circuit2_flow_target_temperature": {
                 "name": "Target flow temperature 2"
@@ -1804,7 +1808,7 @@
                 "name": "Flow temperature"
             },
             "heat_pump_thermal_power": {
-                "name": "Thermal power"
+                "name": "Estimated heat output (performance map)"
             },
             "system_warning": {
                 "name": "Warning",
@@ -1989,7 +1993,11 @@
                     "heat_pump_operation_35": "Setback mode",
                     "heat_pump_operation_36": "Standby",
                     "heat_pump_operation_37": "Heating SGR",
+                    "heat_pump_operation_38": "Cooling mode SGR3",
                     "heat_pump_operation_39": "Domestic hot water SGR",
+                    "heat_pump_operation_40": "Heating mode SGR4",
+                    "heat_pump_operation_41": "Cooling mode SGR4",
+                    "heat_pump_operation_42": "Hot water mode SGR4",
                     "heat_pump_operation_43": "Oil return"
                 }
             },
@@ -2001,7 +2009,7 @@
                 }
             },
             "statistics_daily_cop": {
-                "name": "Daily performance factor today"
+                "name": "Daily COP today"
             },
             "heat_pump_temperature_spread": {
                 "name": "Spread"
@@ -2032,6 +2040,98 @@
             },
             "domestic_hot_water_temperature": {
                 "name": "Hot water temperature"
+            },
+            "system_pv_setpoint": {
+                "name": "PV power setpoint"
+            },
+            "heating_circuit_comfort_room_target_temperature": {
+                "name": "Room setpoint temperature comfort"
+            },
+            "heating_circuit_normal_room_target_temperature": {
+                "name": "Room setpoint temperature normal"
+            },
+            "heating_circuit_lowering_room_target_temperature": {
+                "name": "Room setpoint temperature lowering"
+            },
+            "heating_circuit_heating_curve": {
+                "name": "Heating curve (slope)"
+            },
+            "heating_circuit_summer_winter_switch_temperature": {
+                "name": "Summer/winter changeover"
+            },
+            "heating_circuit_constant_heating_temperature": {
+                "name": "Heating constant temperature"
+            },
+            "heating_circuit_constant_heating_lowering_temperature": {
+                "name": "Heating constant temperature setback"
+            },
+            "heating_circuit_constant_cooling_temperature": {
+                "name": "Cooling constant temperature"
+            },
+            "domestic_hot_water_normal_temperature": {
+                "name": "Domestic hot water normal"
+            },
+            "domestic_hot_water_lowering_temperature": {
+                "name": "Domestic hot water lowering"
+            },
+            "system_operating_mode": {
+                "name": "System operating mode",
+                "state": {
+                    "system_operating_mode_second_heat_source": "2nd heat source",
+                    "system_operating_mode_automatic": "Automatic",
+                    "system_operating_mode_heating": "Heating",
+                    "system_operating_mode_cooling": "Cooling",
+                    "system_operating_mode_summer": "Summer",
+                    "system_operating_mode_standby": "Standby"
+                }
+            },
+            "heating_circuit_operation_mode": {
+                "name": "Operating mode",
+                "state": {
+                    "heating_circuit_operation_mode_lowering": "Setback mode",
+                    "heating_circuit_operation_mode_automatic": "Automatic",
+                    "heating_circuit_operation_mode_normal": "Normal",
+                    "heating_circuit_operation_mode_standby": "Standby",
+                    "heating_circuit_operation_mode_comfort": "Comfort"
+                }
+            },
+            "domestic_hot_water_push_minutes": {
+                "name": "Hot water boost timer"
+            },
+            "heat_pump_pump_regulation_heating": {
+                "name": "Pump regulation for heating",
+                "state": {
+                    "constant_speed": "Constant operation",
+                    "flow_rate": "Flow rate"
+                }
+            },
+            "heat_pump_pump_regulation_hot_water": {
+                "name": "Pump regulation for hot water",
+                "state": {
+                    "constant_speed": "Constant operation",
+                    "flow_rate": "Flow rate"
+                }
+            },
+            "heat_pump_pump_regulation_cooling": {
+                "name": "Pump regulation for cooling",
+                "state": {
+                    "constant_speed": "Constant operation",
+                    "flow_rate": "Flow rate"
+                }
+            },
+            "heat_pump_pump_function": {
+                "name": "Circulation pump function",
+                "state": {
+                    "feed_pump": "Feed pump",
+                    "heating_circuit_pump": "Heating circuit pump"
+                }
+            },
+            "heat_pump_pump_utility_lock_release": {
+                "name": "Pump enabled during utility lockout",
+                "state": {
+                    "off": "Off",
+                    "on": "On"
+                }
             }
         }
     },

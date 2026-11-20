@@ -20,7 +20,7 @@ class HeatingCircuitInput(WeishauptComponent):
         31101,
         0.1,
         unit="°C",
-        nan=32768,
+        nan=(1, 32768),
     )
 
     room_temperature = sensor_temperature(31102)
@@ -31,7 +31,7 @@ class HeatingCircuitInput(WeishauptComponent):
         31104,
         0.1,
         unit="°C",
-        nan=32768,
+        nan=(1, 32768),
     )
 
     flow_temperature = sensor_temperature(31105)

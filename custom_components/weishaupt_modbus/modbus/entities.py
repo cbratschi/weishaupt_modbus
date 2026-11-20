@@ -54,7 +54,10 @@ class WeishauptEntity(CoordinatorEntity[WeishauptCoordinator]):
         """Return whether the entity is available."""
         return (
             super().available
-            and self.description.report_name in self.coordinator.data.updated
+            and (
+                getattr(self.description, "update_report", None)
+                or self.description.report_name
+            ) in self.coordinator.data.updated
         )
 
     @property
@@ -96,6 +99,8 @@ class WeishauptSensor(WeishauptEntity, SensorEntity):
         super().__init__(coordinator, description, config_entry)
 
         self._attr_device_class = description.params.device_class
+        if description.params.options:
+            self._attr_options = list(description.params.options)
         self._attr_state_class = description.params.state_class
         self._attr_native_unit_of_measurement = (
             description.params.native_unit_of_measurement

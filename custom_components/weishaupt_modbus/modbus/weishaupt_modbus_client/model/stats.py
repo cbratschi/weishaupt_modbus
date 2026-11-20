@@ -10,25 +10,25 @@ class StatisticsInput(WeishauptComponent):
 
     register_space = "input"
 
-    total_energy_today = integer(36101)
-    total_energy_yesterday = integer(36102)
-    total_energy_month = integer(36103)
-    total_energy_year = integer(36104)
+    total_energy_today = integer(36101, signed=False)
+    total_energy_yesterday = integer(36102, signed=False)
+    total_energy_month = integer(36103, signed=False)
+    total_energy_year = integer(36104, signed=False)
 
-    heating_energy_today = integer(36201)
-    heating_energy_yesterday = integer(36202)
-    heating_energy_month = integer(36203)
-    heating_energy_year = integer(36204)
+    heating_energy_today = integer(36201, signed=False)
+    heating_energy_yesterday = integer(36202, signed=False)
+    heating_energy_month = integer(36203, signed=False)
+    heating_energy_year = integer(36204, signed=False)
 
-    hot_water_energy_today = integer(36301)
-    hot_water_energy_yesterday = integer(36302)
-    hot_water_energy_month = integer(36303)
-    hot_water_energy_year = integer(36304)
+    hot_water_energy_today = integer(36301, signed=False)
+    hot_water_energy_yesterday = integer(36302, signed=False)
+    hot_water_energy_month = integer(36303, signed=False)
+    hot_water_energy_year = integer(36304, signed=False)
 
-    cooling_energy_today = integer(36401)
-    cooling_energy_yesterday = integer(36402)
-    cooling_energy_month = integer(36403)
-    cooling_energy_year = integer(36404)
+    cooling_energy_today = integer(36401, signed=False)
+    cooling_energy_yesterday = integer(36402, signed=False)
+    cooling_energy_month = integer(36403, signed=False)
+    cooling_energy_year = integer(36404, signed=False)
 
     defrost_energy_today = integer(36501)
     defrost_energy_yesterday = integer(36502)

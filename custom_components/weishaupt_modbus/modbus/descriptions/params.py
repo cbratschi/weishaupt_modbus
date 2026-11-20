@@ -25,6 +25,7 @@ class SensorParams:
     native_unit_of_measurement: str | None = None
     suggested_display_precision: int | None = None
     is_enum: bool = False
+    options: tuple[str, ...] = ()
     icon: str | None = None
 
 

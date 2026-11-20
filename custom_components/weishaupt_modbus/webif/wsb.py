@@ -1,4 +1,4 @@
-"""Read the WSB pump setpoints and operating hours from WEM Lokal."""
+"""Read WSB pump settings and internal heater counters from WEM Lokal."""
 
 import asyncio
 from dataclasses import dataclass
@@ -43,7 +43,8 @@ class WsbField:
     report: str
     key: str
     label: str
-    unit: str
+    unit: str | None = None
+    choices: tuple[tuple[str, str], ...] = ()
 
 
 _PUMP = (
@@ -53,7 +54,43 @@ _PUMP = (
     ),
     WsbField("heat_pump", "cooling_pump_power_setpoint", "Leistung Kühlen", PERCENTAGE),
 )
-_HOURS = (
+_PUMP_REGULATION = (
+    ("Konstantbetrieb", "constant_speed"),
+    ("Volumenstrom", "flow_rate"),
+)
+_PUMP_SETTINGS = (
+    WsbField(
+        "heat_pump",
+        "pump_regulation_heating",
+        "Regelungsart Heizen",
+        choices=_PUMP_REGULATION,
+    ),
+    WsbField(
+        "heat_pump",
+        "pump_regulation_hot_water",
+        "Regelungsart WW",
+        choices=_PUMP_REGULATION,
+    ),
+    WsbField(
+        "heat_pump",
+        "pump_regulation_cooling",
+        "Regelungsart Kühlen",
+        choices=_PUMP_REGULATION,
+    ),
+    WsbField(
+        "heat_pump",
+        "pump_function",
+        "Funktion",
+        choices=(("Zubringerpumpe", "feed_pump"), ("HK-Pumpe", "heating_circuit_pump")),
+    ),
+    WsbField(
+        "heat_pump",
+        "pump_utility_lock_release",
+        "Freigabe bei EVU-Sperre",
+        choices=(("Aus", "off"), ("Ein", "on")),
+    ),
+)
+_HEATER_COUNTERS = (
     WsbField(
         "second_heat_source",
         "electric_heater_1_operating_hours",
@@ -66,8 +103,14 @@ _HOURS = (
         "Betriebsstunden E2",
         UnitOfTime.HOURS,
     ),
+    WsbField(
+        "second_heat_source",
+        "electric_heater_1_switch_cycles",
+        "Schaltspiele E1",
+        "",
+    ),
 )
-WSB_FIELDS = _PUMP + _HOURS
+WSB_FIELDS = _PUMP + _PUMP_SETTINGS + _HEATER_COUNTERS
 
 
 def _menu(page: BeautifulSoup, label: str) -> str:
@@ -84,9 +127,9 @@ def _menu(page: BeautifulSoup, label: str) -> str:
     return links[-1]
 
 
-def _pump_values(page: BeautifulSoup) -> dict[str, int]:
+def _pump_values(page: BeautifulSoup) -> dict[str, int | str]:
     labels = [" ".join(anchor.stripped_strings) for anchor in page.find_all("a")]
-    values = {}
+    values: dict[str, int | str] = {}
     for field in _PUMP:
         matches = [
             match
@@ -99,12 +142,20 @@ def _pump_values(page: BeautifulSoup) -> dict[str, int]:
         ]
         if len(matches) == 1 and (value := int(matches[0][1])) <= 100:
             values[field.key] = value
+    for field in _PUMP_SETTINGS:
+        choices = dict(field.choices)
+        prefix = field.label + " "
+        matches = [
+            label.removeprefix(prefix) for label in labels if label.startswith(prefix)
+        ]
+        if len(matches) == 1 and matches[0] in choices:
+            values[field.key] = choices[matches[0]]
     return values
 
 
 def _hour_values(page: BeautifulSoup) -> dict[str, int]:
     values = {}
-    for field in _HOURS:
+    for field in _HEATER_COUNTERS:
         matches = []
         for row in page.select("div.nav-link.browseobj"):
             heading = row.find("h5")
@@ -112,12 +163,13 @@ def _hour_values(page: BeautifulSoup) -> dict[str, int]:
                 matches.append(
                     row.get_text(" ", strip=True).removeprefix(field.label).strip()
                 )
-        if len(matches) == 1 and (match := re.fullmatch(r"(\d+)\s*h", matches[0])):
+        pattern = r"(\d+)\s*h" if field.unit == UnitOfTime.HOURS else r"(\d+)"
+        if len(matches) == 1 and (match := re.fullmatch(pattern, matches[0])):
             values[field.key] = int(match[1])
     return values
 
 
-class WsbWebifCoordinator(DataUpdateCoordinator[dict[str, int]]):
+class WsbWebifCoordinator(DataUpdateCoordinator[dict[str, int | str]]):
     """Keep WEM availability independent of the Modbus coordinator."""
 
     def __init__(
@@ -148,10 +200,10 @@ class WsbWebifCoordinator(DataUpdateCoordinator[dict[str, int]]):
             raise ValueError("WEM export unavailable")
         return BeautifulSoup(response.text, "html.parser")
 
-    async def _async_update_data(self) -> dict[str, int]:
+    async def _async_update_data(self) -> dict[str, int | str]:
         if self.api is None:
             return {}
-        values = {}
+        values: dict[str, int | str] = {}
         try:
             root = await self._get_page(_ROOT)
         except (TimeoutError, ValueError, WeishauptWebifError) as err:
@@ -192,7 +244,11 @@ class WsbWebifSensor(CoordinatorEntity[WsbWebifCoordinator], SensorEntity):
         self._attr_unique_id = f"{identity}_{field.report}_{field.key}"
         self._attr_translation_key = f"{field.report}_{field.key}"
         self._attr_native_unit_of_measurement = field.unit
-        self._attr_state_class = SensorStateClass.MEASUREMENT
+        if field.choices:
+            self._attr_device_class = SensorDeviceClass.ENUM
+            self._attr_options = [key for _, key in field.choices]
+        else:
+            self._attr_state_class = SensorStateClass.MEASUREMENT
         if field.unit == UnitOfTime.HOURS:
             self._attr_device_class = SensorDeviceClass.DURATION
             # The stable sensor recorded hourly statistics as measurements.
@@ -210,6 +266,6 @@ class WsbWebifSensor(CoordinatorEntity[WsbWebifCoordinator], SensorEntity):
         return super().available and self.field.key in (self.coordinator.data or {})
 
     @property
-    def native_value(self) -> int | None:
+    def native_value(self) -> int | str | None:
         """Return the value from the current poll."""
         return (self.coordinator.data or {}).get(self.field.key)
