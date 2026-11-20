@@ -1777,6 +1777,8 @@
                 "name": "Status E-heater 1",
                 "state": {
                     "second_heat_source_electric_heater_1_status_0": "Off",
+                    "w2_status_aus": "Off",
+                    "w2_status_ein": "On",
                     "second_heat_source_electric_heater_1_status_1": "On"
                 }
             },
@@ -1784,6 +1786,8 @@
                 "name": "Status E-heater 2",
                 "state": {
                     "second_heat_source_electric_heater_2_status_0": "Off",
+                    "w2_status_aus": "Off",
+                    "w2_status_ein": "On",
                     "second_heat_source_electric_heater_2_status_1": "On"
                 }
             },

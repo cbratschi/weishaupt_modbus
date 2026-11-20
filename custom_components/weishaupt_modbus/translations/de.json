@@ -1782,6 +1782,8 @@
                 "name": "Status E-Heizung 1",
                 "state": {
                     "second_heat_source_electric_heater_1_status_0": "aus",
+                    "w2_status_aus": "aus",
+                    "w2_status_ein": "ein",
                     "second_heat_source_electric_heater_1_status_1": "ein"
                 }
             },
@@ -1789,6 +1791,8 @@
                 "name": "Status E-Heizung 2",
                 "state": {
                     "second_heat_source_electric_heater_2_status_0": "aus",
+                    "w2_status_aus": "aus",
+                    "w2_status_ein": "ein",
                     "second_heat_source_electric_heater_2_status_1": "ein"
                 }
             },

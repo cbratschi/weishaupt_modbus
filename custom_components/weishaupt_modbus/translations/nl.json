@@ -1777,6 +1777,8 @@
                 "name": "Status E-verwarming 1",
                 "state": {
                     "second_heat_source_electric_heater_1_status_0": "Uit",
+                    "w2_status_aus": "Uit",
+                    "w2_status_ein": "Aan",
                     "second_heat_source_electric_heater_1_status_1": "Aan"
                 }
             },
@@ -1784,6 +1786,8 @@
                 "name": "Status E-verwarming 2",
                 "state": {
                     "second_heat_source_electric_heater_2_status_0": "Uit",
+                    "w2_status_aus": "Uit",
+                    "w2_status_ein": "Aan",
                     "second_heat_source_electric_heater_2_status_1": "Aan"
                 }
             },
