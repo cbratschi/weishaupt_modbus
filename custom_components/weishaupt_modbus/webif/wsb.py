@@ -31,6 +31,7 @@ from homeassistant.helpers.update_coordinator import (
 _LOGGER = logging.getLogger(__name__)
 _ROOT = "/settings_export.html"
 WSB_REQUEST_DELAY_SECONDS = 1.0
+_REQUEST_TIMEOUT = 10
 _EXPORT_LINK = re.compile(r"/settings_export\.html\?stack=[0-9a-fA-F,]+")
 _CONTROLLER_FIRMWARE = re.compile(r"\bWWP-CPU COM V(\d+\.\d+) Rev\.\s*(\d+)\b")
 
@@ -141,7 +142,8 @@ class WsbWebifCoordinator(DataUpdateCoordinator[dict[str, int]]):
             raise ValueError("WEM is disabled")
         # The pinned client handles pacing and reauthentication. The profile
         # follows only same-device export menu links and never submits settings.
-        response = await self.api._request("GET", path)  # noqa: SLF001
+        async with self.mcu_lock, asyncio.timeout(_REQUEST_TIMEOUT):
+            response = await self.api._request("GET", path)  # noqa: SLF001
         if response.status_code != 200:
             raise ValueError("WEM export unavailable")
         return BeautifulSoup(response.text, "html.parser")
@@ -150,28 +152,25 @@ class WsbWebifCoordinator(DataUpdateCoordinator[dict[str, int]]):
         if self.api is None:
             return {}
         values = {}
-        async with self.mcu_lock:
+        try:
+            root = await self._get_page(_ROOT)
+        except (TimeoutError, ValueError, WeishauptWebifError) as err:
+            _LOGGER.debug("WSB WEM root unavailable (%s)", type(err).__name__)
+            return values
+        if match := _CONTROLLER_FIRMWARE.search(root.get_text(" ", strip=True)):
+            self.controller_firmware = f"WWP-CPU COM V{match[1]} R{match[2]}"
+        for first, second, parse in (
+            ("Wärmepumpe", "Pumpe", _pump_values),
+            ("Info", "2. WEZ", _hour_values),
+        ):
             try:
-                async with asyncio.timeout(6):
-                    root = await self._get_page(_ROOT)
+                section = await self._get_page(_menu(root, first))
+                page = await self._get_page(_menu(section, second))
+                values.update(parse(page))
             except (TimeoutError, ValueError, WeishauptWebifError) as err:
-                _LOGGER.debug("WSB WEM root unavailable (%s)", type(err).__name__)
-                return values
-            if match := _CONTROLLER_FIRMWARE.search(root.get_text(" ", strip=True)):
-                self.controller_firmware = f"WWP-CPU COM V{match[1]} R{match[2]}"
-            for first, second, parse in (
-                ("Wärmepumpe", "Pumpe", _pump_values),
-                ("Info", "2. WEZ", _hour_values),
-            ):
-                try:
-                    async with asyncio.timeout(6):
-                        section = await self._get_page(_menu(root, first))
-                        page = await self._get_page(_menu(section, second))
-                    values.update(parse(page))
-                except (TimeoutError, ValueError, WeishauptWebifError) as err:
-                    _LOGGER.debug(
-                        "WSB WEM menu %s unavailable (%s)", second, type(err).__name__
-                    )
+                _LOGGER.debug(
+                    "WSB WEM menu %s unavailable (%s)", second, type(err).__name__
+                )
         return values
 
 
