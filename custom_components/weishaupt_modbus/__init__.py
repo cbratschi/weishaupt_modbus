@@ -15,7 +15,7 @@ from .modbus.coordinator import WeishauptCoordinator
 from .modbus.weishaupt_modbus_client.model.device import Weishaupt
 from .webif.coordinator import WeishauptWebifCoordinator
 from .webif.description.description import WebifConnection
-from .webif.wsb import WsbWebifCoordinator
+from .webif.wsb import WSB_REQUEST_DELAY_SECONDS, WsbWebifCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -43,10 +43,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: MyConfigEntry) -> bool:
     wsb_coordinator = None
 
     if entry.data.get(CONF.CB_WEBIF):
+        webif_options = (
+            {"request_delay": WSB_REQUEST_DELAY_SECONDS} if wsb_read_only else {}
+        )
         webif_api = WebifConnection(
             ip=entry.data[CONF.HOST],
             user=entry.data[CONF.USERNAME],
             password=entry.data[CONF.PASSWORD],
+            **webif_options,
         )
 
         if not wsb_read_only:

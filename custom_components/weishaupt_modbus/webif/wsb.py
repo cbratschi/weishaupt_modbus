@@ -30,6 +30,7 @@ from homeassistant.helpers.update_coordinator import (
 
 _LOGGER = logging.getLogger(__name__)
 _ROOT = "/settings_export.html"
+WSB_REQUEST_DELAY_SECONDS = 1.0
 _EXPORT_LINK = re.compile(r"/settings_export\.html\?stack=[0-9a-fA-F,]+")
 
 
