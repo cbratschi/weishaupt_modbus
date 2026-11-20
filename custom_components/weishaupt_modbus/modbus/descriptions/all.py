@@ -3,6 +3,7 @@
 from ...configentry import MyConfigEntry
 from ...const import CONF
 from .calculated import CALCULATERD_ENTITIES
+from .description import SensorDescription
 from .domestic_hot_water import DOMESTIC_HOT_WATER_ENTITIES
 from .heat_pump import HEAT_PUMP_ENTITIES
 from .heating_circuit import (
@@ -16,6 +17,14 @@ from .io import IO_ENTITIES
 from .second_heat_source import SECOND_HEAT_SOURCE_ENTITIES
 from .stats import STATISTICS_ENTITIES
 from .system import SYSTEM_ENTITIES
+
+WSB_UNVERIFIED_MODBUS_KEYS = {
+    "electric_heater_1_operating_hours",
+    "electric_heater_2_operating_hours",
+    "electric_heater_2_switch_cycles",
+    "sensor_output_h1_4",
+    "sensor_output_h1_5",
+}
 
 
 def get_entities(entry: MyConfigEntry) -> tuple:
@@ -39,4 +48,11 @@ def get_entities(entry: MyConfigEntry) -> tuple:
         readings += HEATING_CIRCUIT_ENTITIES4
     if entry.data.get(CONF.HK5, False) is True:
         readings += HEATING_CIRCUIT_ENTITIES5
+    if entry.data.get(CONF.WSB_READ_ONLY):
+        return tuple(
+            description
+            for description in readings
+            if isinstance(description, SensorDescription)
+            and description.key not in WSB_UNVERIFIED_MODBUS_KEYS
+        )
     return readings

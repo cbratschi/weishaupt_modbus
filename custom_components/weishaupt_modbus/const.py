@@ -38,6 +38,8 @@ class ConfConstants:
     CB_WEBIF_2WEZ: str = "Poll 2. Wärmeerzeuger"
     CB_WEBIF_SATISTICS: str = "Poll Statistik"
     UID_MIGRATION: str = "entity_uid_migration"
+    IDENTITY_SEED: str = "identity_seed"
+    WSB_READ_ONLY: str = "wsb_read_only"
     PREFIX: str = CONF_PREFIX
     DEVICE_POSTFIX: str = "Device-Postfix"
     NAME_DEVICE_PREFIX: str = "Name-Device-Prefix"

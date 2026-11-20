@@ -85,6 +85,7 @@ async def test_async_migrate_entry_from_version_1():
     hass = MagicMock()
     config_entry = MagicMock()
     config_entry.version = 1
+    config_entry.entry_id = "test_entry"
     config_entry.data = {
         CONF.HOST: "192.168.1.100",
     }
@@ -133,7 +134,8 @@ async def test_async_migrate_entry_from_version_1():
     assert data[CONF.CB_WEBIF_SATISTICS] is False
 
     # Version 8 -> 9
-    assert data[CONF.MAC] == "CHANGEME"
+    assert CONF.MAC not in data
+    assert data[CONF.IDENTITY_SEED] == "entry_test_entry"
 
     # Final migration version
     assert final_call.kwargs["version"] == 9
@@ -148,6 +150,7 @@ async def test_async_migrate_entry_to_version_9():
     config_entry.version = 8
     config_entry.data = {
         CONF.HOST: "192.168.1.100",
+        CONF.MAC: "02:00:00:00:00:01",
     }
 
     result = await async_migrate_entry(hass, config_entry)
@@ -156,14 +159,11 @@ async def test_async_migrate_entry_to_version_9():
 
     update_calls = hass.config_entries.async_update_entry.call_args_list
 
-    assert len(update_calls) == 2
-
-    assert update_calls[0].kwargs["version"] == 8
+    assert len(update_calls) == 1
+    assert update_calls[0].kwargs["version"] == 9
     assert update_calls[0].kwargs["minor_version"] == 1
-
-    assert update_calls[1].kwargs["version"] == 9
-    assert update_calls[1].kwargs["minor_version"] == 1
-    assert update_calls[1].kwargs["data"][CONF.MAC] == "CHANGEME"
+    assert update_calls[0].kwargs["data"][CONF.MAC] == "02:00:00:00:00:01"
+    assert update_calls[0].kwargs["data"][CONF.IDENTITY_SEED] == "02:00:00:00:00:01"
 
 
 @pytest.mark.asyncio
@@ -391,22 +391,6 @@ async def test_async_setup_entry_with_webif() -> None:
 
     assert entry.runtime_data.webif_api is webif_api
     assert entry.runtime_data.webif_coordinator is webif_coordinator
-
-
-@pytest.mark.asyncio
-async def test_async_setup_entry_with_placeholder_mac(caplog) -> None:
-    """Test that setup fails when the MAC address was not migrated/configured."""
-    hass = MagicMock()
-
-    entry = MagicMock()
-    entry.data = {
-        CONF.MAC: "CHANGEME",
-    }
-
-    result = await async_setup_entry(hass, entry)
-
-    assert result is False
-    assert "MAC Address not set" in caplog.text
 
 
 @pytest.mark.asyncio

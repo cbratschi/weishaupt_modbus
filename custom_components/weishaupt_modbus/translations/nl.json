@@ -23,6 +23,7 @@
                     "Port": "Poort",
                     "Prefix": "Prefix",
                     "enable-webif": "Experimentele WebIf inschakelen?",
+                    "wsb_read_only": "Alleen-lezen WSB-profiel",
                     "Poll Heizkreis 1": "Verwarmingscircuit 1 ophalen?",
                     "Poll Heizkreis 2": "Verwarmingscircuit 2 ophalen?",
                     "Poll Heizkreis 3": "Verwarmingscircuit 3 ophalen?",
@@ -48,6 +49,7 @@
                     "Port": "Poort",
                     "Prefix": "Prefix",
                     "enable-webif": "Experimentele WebIf inschakelen?",
+                    "wsb_read_only": "Alleen-lezen WSB-profiel",
                     "Use-Mockup-Data": "Testgegevens gebruiken voor ontwikkeling?",
                     "Poll Heizkreis 1": "Verwarmingscircuit 1 ophalen?",
                     "Poll Heizkreis 2": "Verwarmingscircuit 2 ophalen?",
@@ -985,6 +987,15 @@
             }
         },
         "sensor": {
+            "heat_pump_heating_pump_power_setpoint": {
+                "name": "Pompvermogen verwarmen"
+            },
+            "heat_pump_hot_water_pump_power_setpoint": {
+                "name": "Pompvermogen warm water"
+            },
+            "heat_pump_cooling_pump_power_setpoint": {
+                "name": "Pompvermogen koelen"
+            },
             "statistics_defrost_energy_yesterday": {
                 "name": "Ontdooi-energie gisteren"
             },

@@ -5,6 +5,7 @@ from datetime import timedelta
 import logging
 from typing import TYPE_CHECKING, override
 
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
@@ -32,12 +33,15 @@ class WeishauptCoordinator(DataUpdateCoordinator[UpdateReport]):
         hass: HomeAssistant,
         device: Weishaupt,
         mcu_lock: asyncio.Lock,
+        *,
+        config_entry: ConfigEntry | None = None,
     ) -> None:
         """Initialize the Weishaupt coordinator."""
         super().__init__(
             hass,
             _LOGGER,
             name="Weishaupt",
+            config_entry=config_entry,
             update_interval=timedelta(seconds=10),
         )
         self.device = device

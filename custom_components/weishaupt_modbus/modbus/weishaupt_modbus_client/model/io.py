@@ -5,8 +5,8 @@ from modbus_connection.model import gauge, integer
 from .component import WeishauptComponent
 
 
-class IOInput(WeishauptComponent):
-    """Weishaupt IO input registers."""
+class WsbIOInput(WeishauptComponent):
+    """Weishaupt IO inputs available on the tested WSB controller."""
 
     register_space = "input"
 
@@ -22,12 +22,6 @@ class IOInput(WeishauptComponent):
     output_h1_3 = integer(35104)
     """H1.3 output status."""
 
-    output_h1_4 = integer(35105)
-    """H1.4 output status."""
-
-    output_h1_5 = integer(35106)
-    """H1.5 output status."""
-
     input_de1 = gauge(
         35107,
         1,
@@ -41,6 +35,16 @@ class IOInput(WeishauptComponent):
         unit=None,
     )
     """DE2 input status."""
+
+
+class IOInput(WsbIOInput):
+    """Weishaupt IO inputs including optional outputs H1.4 and H1.5."""
+
+    output_h1_4 = integer(35105)
+    """H1.4 output status."""
+
+    output_h1_5 = integer(35106)
+    """H1.5 output status."""
 
 
 class IOConfig(WeishauptComponent):

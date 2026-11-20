@@ -14,7 +14,7 @@ from custom_components.weishaupt_modbus.migrate_helpers import (
     remove_heating_circuit_entities,
 )
 
-from config.custom_components.weishaupt_modbus.const import CONF, CONST
+from custom_components.weishaupt_modbus.const import CONF, CONST
 
 
 def test_old_unique_id() -> None:
@@ -73,29 +73,6 @@ def test_remove_heating_circuit_entities_active() -> None:
     assert remove_heating_circuit_entities(config_entry, MagicMock()) == ()
 
 
-def test_migrate_entities_with_placeholder_mac() -> None:
-    """Test that migration is skipped without a valid MAC."""
-    config_entry = MagicMock()
-    config_entry.data = {
-        CONF.MAC: "CHANGEME",
-    }
-
-    hass = MagicMock()
-
-    with (
-        patch(
-            "custom_components.weishaupt_modbus.migrate_helpers.er.async_get"
-        ) as entity_get,
-        patch(
-            "custom_components.weishaupt_modbus.migrate_helpers.dr.async_get"
-        ) as device_get,
-    ):
-        migrate_entities(config_entry, hass)
-
-    entity_get.assert_not_called()
-    device_get.assert_not_called()
-
-
 def test_migrate_entities() -> None:
     """Test entity migration and deletion."""
     config_entry = MagicMock()
@@ -133,6 +110,7 @@ def test_migrate_entities() -> None:
     untouched_entity.unique_id = "something_else"
 
     entity_registry = MagicMock()
+    entity_registry.async_get_entity_id.return_value = None
     entity_registry.entities.get_entries_for_config_entry_id.return_value = [
         migrated_entity,
         deleted_entity,

@@ -7,7 +7,7 @@ from homeassistant.components.modbus.connection import ModbusTcpParams, async_ge
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
-from .configentry import MyConfigEntry, MyData
+from .configentry import MyConfigEntry, MyData, entity_identity
 from .const import CONF, CONST
 from .kennfeld.kennfeld import PowerMap
 from .migrate_helpers import migrate_entities
@@ -15,6 +15,7 @@ from .modbus.coordinator import WeishauptCoordinator
 from .modbus.weishaupt_modbus_client.model.device import Weishaupt
 from .webif.coordinator import WeishauptWebifCoordinator
 from .webif.description.description import WebifConnection
+from .webif.wsb import WsbWebifCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -34,27 +35,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: MyConfigEntry) -> bool:
     #    entry.entry_id,
     # )
 
-    if entry.data.get(CONF.MAC) == "CHANGEME":
-        _LOGGER.error("MAC Address not set. Reconfigure integration and set MAC")
-        _LOGGER.error(
-            "In case you need help: https://github.com/OStrama/weishaupt_modbus"
-        )
-        return False
-
-    if not entry.data.get(CONF.UID_MIGRATION, False):
-        migrate_entities(entry, hass)
-
-        hass.config_entries.async_update_entry(
-            entry,
-            data={
-                **entry.data,
-                CONF.UID_MIGRATION: True,
-            },
-        )
-
+    wsb_read_only = entry.data.get(CONF.WSB_READ_ONLY, False)
     mcu_lock = asyncio.Lock()
 
     webif_coordinator = None
+    webif_api = None
+    wsb_coordinator = None
 
     if entry.data.get(CONF.CB_WEBIF):
         webif_api = WebifConnection(
@@ -63,16 +49,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: MyConfigEntry) -> bool:
             password=entry.data[CONF.PASSWORD],
         )
 
-        webif_coordinator = WeishauptWebifCoordinator(
-            hass=hass,
-            api=webif_api,
-            entry=entry,
-            mcu_lock=mcu_lock,
-        )
+        if not wsb_read_only:
+            webif_coordinator = WeishauptWebifCoordinator(
+                hass=hass,
+                api=webif_api,
+                entry=entry,
+                mcu_lock=mcu_lock,
+            )
+            await webif_coordinator.async_config_entry_first_refresh()
 
-        await webif_coordinator.async_config_entry_first_refresh()
-    else:
-        webif_api = None
+    if wsb_read_only:
+        wsb_coordinator = WsbWebifCoordinator(hass, webif_api, mcu_lock)
     readings = [
         "system",
         "heat_pump",
@@ -102,15 +89,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: MyConfigEntry) -> bool:
         params,
         1,
     )
-    device = Weishaupt(unit, readings)
+    device = Weishaupt(unit, readings, wsb_read_only=wsb_read_only)
     weishaupt_coordinator = WeishauptCoordinator(
         hass=hass,
-        # entry=entry,
+        config_entry=entry,
         device=device,
-        # interval=timedelta(seconds=30),
         mcu_lock=mcu_lock,
     )
     await weishaupt_coordinator.async_config_entry_first_refresh()
+    if wsb_coordinator is not None:
+        await wsb_coordinator.async_refresh()
 
     entry.runtime_data = MyData(
         config_dir=hass.config.config_dir,
@@ -119,12 +107,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: MyConfigEntry) -> bool:
         weishaupt_coordinator=weishaupt_coordinator,
         webif_api=webif_api,
         webif_coordinator=webif_coordinator,
+        wsb_coordinator=wsb_coordinator,
         mcu_lock=mcu_lock,
     )
 
     powermap = PowerMap(entry, hass)
     await powermap.initialize()
     entry.runtime_data.powermap = powermap
+
+    if not entry.data.get(CONF.UID_MIGRATION, False):
+        migrate_entities(entry, hass)
+        hass.config_entries.async_update_entry(
+            entry,
+            data={
+                **entry.data,
+                CONF.IDENTITY_SEED: entity_identity(entry),
+                CONF.UID_MIGRATION: True,
+            },
+        )
 
     # see https://community.home-assistant.io/t/config-flow-how-to-update-an-existing-entity/522442/8
     entry.async_on_unload(entry.add_update_listener(update_listener))
@@ -163,6 +163,9 @@ async def update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
 async def async_migrate_entry(hass: HomeAssistant, config_entry: MyConfigEntry) -> bool:
     """Migrate old entry."""
 
+    if config_entry.version > 9:
+        return False
+
     new_data = {**config_entry.data}
     _LOGGER.warning(
         "Starting config migration process. Current version: %s", config_entry.version
@@ -190,9 +193,6 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: MyConfigEntry) 
         new_data[CONF.USERNAME] = ""
         new_data[CONF.PASSWORD] = ""
         new_data[CONF.WEBIF_TOKEN] = ""
-        hass.config_entries.async_update_entry(
-            config_entry, data=new_data, minor_version=1, version=5
-        )
     if config_entry.version < 7:
         _LOGGER.warning("Version <7 detected")
         new_data[CONF.CB_WEBIF_MOCKUP_DATA] = False
@@ -207,14 +207,7 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: MyConfigEntry) 
         new_data[CONF.CB_WEBIF_2WEZ] = False
         new_data[CONF.CB_WEBIF_SATISTICS] = False
 
-    hass.config_entries.async_update_entry(
-        config_entry, data=new_data, minor_version=1, version=8
-    )
-    _LOGGER.warning("Config entries updated to version 8")
-
-    if config_entry.version < 9:
-        _LOGGER.warning("Version <9 detected")
-        new_data[CONF.MAC] = "CHANGEME"
+    new_data[CONF.IDENTITY_SEED] = entity_identity(config_entry)
 
     hass.config_entries.async_update_entry(
         config_entry, data=new_data, minor_version=1, version=9
@@ -225,10 +218,7 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: MyConfigEntry) 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload entry."""
-    if entry.runtime_data.webif_api is not None:
+    unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    if unloaded and entry.runtime_data.webif_api is not None:
         await entry.runtime_data.webif_api.close()
-
-    return await hass.config_entries.async_unload_platforms(
-        entry,
-        PLATFORMS,
-    )
+    return unloaded

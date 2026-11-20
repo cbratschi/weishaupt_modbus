@@ -8,8 +8,8 @@ from homeassistant.components.sensor import SensorEntity
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from ..configentry import MyConfigEntry
-from ..const import CONF, CONST
+from ..configentry import MyConfigEntry, entity_identity
+from ..const import CONST
 from .coordinator import WeishauptCoordinator
 from .descriptions.description import (
     EntityDescription,
@@ -39,7 +39,7 @@ class WeishauptEntity(CoordinatorEntity[WeishauptCoordinator]):
         super().__init__(coordinator)
 
         self.description = description
-        self._mac = config_entry.data[CONF.MAC]
+        self._mac = entity_identity(config_entry)
         self._weishaupt_config_entry = config_entry
 
         self._attr_has_entity_name = True

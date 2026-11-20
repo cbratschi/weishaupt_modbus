@@ -23,6 +23,7 @@
                     "Port": "Port",
                     "Prefix": "Prefix",
                     "enable-webif": "experimentelles WebIf aktivieren?",
+                    "wsb_read_only": "WSB-Profil mit ausschliesslich lesendem Zugriff",
                     "Poll Heizkreis 1": "Heizkreis 1 abrufen?",
                     "Poll Heizkreis 2": "Heizkreis 2 abrufen?",
                     "Poll Heizkreis 3": "Heizkreis 3 abrufen?",
@@ -48,6 +49,7 @@
                     "Port": "Port",
                     "Prefix": "Prefix",
                     "enable-webif": "experimentelles WebIf aktivieren?",
+                    "wsb_read_only": "WSB-Profil mit ausschliesslich lesendem Zugriff",
                     "Use-Mockup-Data": "Mockup-Daten f\u00fcr die Entwicklung verwenden?",
                     "Poll Heizkreis 1": "Heizkreis 1 abrufen?",
                     "Poll Heizkreis 2": "Heizkreis 2 abrufen?",
@@ -985,6 +987,15 @@
             }
         },
         "sensor": {
+            "heat_pump_heating_pump_power_setpoint": {
+                "name": "Sollwert Pumpe Leistung Heizen"
+            },
+            "heat_pump_hot_water_pump_power_setpoint": {
+                "name": "Sollwert Pumpe Leistung Warmwasser"
+            },
+            "heat_pump_cooling_pump_power_setpoint": {
+                "name": "Sollwert Pumpe Leistung Kühlen"
+            },
             "statistics_defrost_energy_yesterday": {
                 "name": "Abtauen Energie gestern"
             },

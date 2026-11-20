@@ -146,6 +146,10 @@ class ConfigFlow(
                     schema=CONF.CB_WEBIF,
                     default=self._stored_data.get(CONF.CB_WEBIF, False),
                 ): BooleanSelector(),
+                probatio.Optional(
+                    schema=CONF.WSB_READ_ONLY,
+                    default=self._stored_data.get(CONF.WSB_READ_ONLY, False),
+                ): BooleanSelector(),
             }
         )
 

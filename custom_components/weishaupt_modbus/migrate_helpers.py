@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 import logging
 
-from custom_components.weishaupt_modbus.configentry import MyConfigEntry
+from custom_components.weishaupt_modbus.configentry import MyConfigEntry, entity_identity
 from custom_components.weishaupt_modbus.const import CONF, CONST, DeviceConstants
 
 # from homeassistant.components.device_tracker import config_entry
@@ -55,9 +55,8 @@ def migrate_entities(config_entry: MyConfigEntry, hass: HomeAssistant) -> None:
     postfix = config_entry.data.get(CONF.DEVICE_POSTFIX)
     prefix = config_entry.data.get(CONF.PREFIX)
 
-    mac = config_entry.data.get(CONF.MAC)
-    if not mac or mac == "CHANGEME":
-        return
+    mac = entity_identity(config_entry)
+    preserve_legacy = config_entry.data.get(CONF.WSB_READ_ONLY, False)
 
     entity_registry = er.async_get(hass)
     unique_id_migrations: dict[str, str] = {}
@@ -86,7 +85,7 @@ def migrate_entities(config_entry: MyConfigEntry, hass: HomeAssistant) -> None:
 
     for entity in entities:
         # Delte ids that were converted from Sensor to Select or Switch
-        if entity.unique_id in unique_id_deletions:
+        if entity.unique_id in unique_id_deletions and not preserve_legacy:
             _LOGGER.info(
                 "Removing obsolete entity: %s (%s)",
                 entity.entity_id,
@@ -104,6 +103,14 @@ def migrate_entities(config_entry: MyConfigEntry, hass: HomeAssistant) -> None:
             new_entity_uid,
         )
         if new_entity_uid is None:
+            continue
+        target = entity_registry.async_get_entity_id(
+            entity.domain, entity.platform, new_entity_uid
+        )
+        if target is not None and target != entity.entity_id:
+            _LOGGER.warning(
+                "Entity migration skipped due to target conflict: %s", entity.entity_id
+            )
             continue
 
         entity_registry.async_update_entity(
@@ -159,6 +166,8 @@ def migrate_entities(config_entry: MyConfigEntry, hass: HomeAssistant) -> None:
                 and config_entry.data.get(CONF.HK5) is False
             )
         ):
+            if preserve_legacy:
+                continue
             _LOGGER.info(
                 "Removing inactive heating circuit device: %s",
                 old_identifiers,

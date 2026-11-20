@@ -23,6 +23,7 @@
                     "Port": "Port",
                     "Prefix": "Prefix",
                     "enable-webif": "Enable experimental WebIf?",
+                    "wsb_read_only": "Read-only WSB profile",
                     "Poll Heizkreis 1": "Retrieve heating circuit 1?",
                     "Poll Heizkreis 2": "Retrieve heating circuit 2?",
                     "Poll Heizkreis 3": "Retrieve heating circuit 3?",
@@ -48,6 +49,7 @@
                     "Port": "Port",
                     "Prefix": "Prefix",
                     "enable-webif": "Enable experimental WebIf?",
+                    "wsb_read_only": "Read-only WSB profile",
                     "Use-Mockup-Data": "Use mock data for development?",
                     "Poll Heizkreis 1": "Retrieve heating circuit 1?",
                     "Poll Heizkreis 2": "Retrieve heating circuit 2?",
@@ -985,6 +987,15 @@
             }
         },
         "sensor": {
+            "heat_pump_heating_pump_power_setpoint": {
+                "name": "Heating pump power setpoint"
+            },
+            "heat_pump_hot_water_pump_power_setpoint": {
+                "name": "Hot water pump power setpoint"
+            },
+            "heat_pump_cooling_pump_power_setpoint": {
+                "name": "Cooling pump power setpoint"
+            },
             "statistics_defrost_energy_yesterday": {
                 "name": "Defrost energy yesterday"
             },

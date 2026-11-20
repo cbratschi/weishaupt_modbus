@@ -9,7 +9,7 @@ from modbus_connection.model import ComponentGroup
 from .domestic_hot_water import DomesticHotWaterConfig, DomesticHotWaterInput
 from .heat_pump import HeatPumpConfig, HeatPumpInput
 from .heating_circuit import HeatingCircuitConfigs, HeatingCircuitInputs
-from .io import IOConfig, IOInput
+from .io import IOConfig, IOInput, WsbIOInput
 from .second_heat_source import SecondHeatSourceConfig, SecondHeatSourceInput
 from .stats import StatisticsInput
 from .system import SystemConfig, SystemStatus
@@ -43,7 +43,9 @@ else:
 class Weishaupt(Device):
     """Weishaupt WBB device reached through a ModbusUnit."""
 
-    def __init__(self, unit: Any, readings: Iterable[str]) -> None:
+    def __init__(
+        self, unit: Any, readings: Iterable[str], *, wsb_read_only: bool = False
+    ) -> None:
         """__init__ ."""
         super().__init__(unit)
         self._readings = readings
@@ -148,7 +150,7 @@ class Weishaupt(Device):
         )
 
         self.io_config = IOConfig(unit)
-        self.io_input = IOInput(unit)
+        self.io_input = WsbIOInput(unit) if wsb_read_only else IOInput(unit)
 
         self.io = ComponentGroup(
             unit,
@@ -157,6 +159,18 @@ class Weishaupt(Device):
                 self.io_input,
             ],
         )
+
+        if wsb_read_only:
+            self.system = self.system_input
+            self.heat_pump = self.heat_pump_input
+            self.heating_circuit = self.heating_circuit_input
+            self.heating_circuit2 = self.heating_circuit_input2
+            self.heating_circuit3 = self.heating_circuit_input3
+            self.heating_circuit4 = self.heating_circuit_input4
+            self.heating_circuit5 = self.heating_circuit_input5
+            self.domestic_hot_water = self.domestic_hot_water_input
+            self.second_heat_source = self.second_heat_source_input
+            self.io = self.io_input
 
     async def async_update(self) -> UpdateReport:
         """Refresh all device data."""
