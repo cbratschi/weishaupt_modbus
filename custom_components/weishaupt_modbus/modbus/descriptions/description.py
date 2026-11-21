@@ -49,6 +49,7 @@ class SelectDescription:
     enum: type[IntEnum]
     value_fn: Callable[[Weishaupt], int | None]
     set_value_fn: Callable[[Weishaupt, int], Awaitable[None]]
+    update_report: str | None = None
 
 
 EntityDescription = SensorDescription | NumberDescription | SelectDescription

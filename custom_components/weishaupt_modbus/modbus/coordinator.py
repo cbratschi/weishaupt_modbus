@@ -48,10 +48,10 @@ class WeishauptCoordinator(DataUpdateCoordinator[UpdateReport]):
         self.device = device
         self._mcu_lock = mcu_lock
 
-    async def async_write_number(
-        self, setter: Callable[[Weishaupt, float], Awaitable[None]], value: float
+    async def async_write_setting[Setting: (float, int)](
+        self, setter: Callable[[Weishaupt, Setting], Awaitable[None]], value: Setting
     ) -> None:
-        """Serialize numeric writes with polling and refresh after success."""
+        """Serialize setting writes with polling and refresh after success."""
         async with self._mcu_lock:
             await setter(self.device, value)
         await self.async_request_refresh()

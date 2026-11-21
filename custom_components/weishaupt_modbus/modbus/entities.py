@@ -161,10 +161,18 @@ class WeishauptNumber(WeishauptEntity, NumberEntity):
         """Return the current value."""
         return self.description.value_fn(self.coordinator.device)
 
+    @property
+    @override
+    def available(self) -> bool:
+        """Require a valid readback for settings in the WSB profile."""
+        return super().available and (
+            self.description.update_report is None or self.native_value is not None
+        )
+
     @override
     async def async_set_native_value(self, value: float) -> None:
         """Set the value."""
-        await self.coordinator.async_write_number(self.description.set_value_fn, value)
+        await self.coordinator.async_write_setting(self.description.set_value_fn, value)
 
 
 class WeishauptSelect(WeishauptEntity, SelectEntity):
@@ -194,15 +202,15 @@ class WeishauptSelect(WeishauptEntity, SelectEntity):
         if value is None:
             return None
 
-        return self._enum(value).name
+        try:
+            return self._enum(value).name
+        except ValueError:
+            # A running hot-water push can report a minute that is not a preset.
+            return None
 
     @override
     async def async_select_option(self, option: str) -> None:
         """Set the selected option."""
         value = self._enum[option].value
 
-        await self.description.set_value_fn(
-            self.coordinator.device,
-            value,
-        )
-        await self.coordinator.async_request_refresh()
+        await self.coordinator.async_write_setting(self.description.set_value_fn, value)

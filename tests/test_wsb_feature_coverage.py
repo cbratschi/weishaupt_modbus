@@ -13,6 +13,7 @@ from custom_components.weishaupt_modbus.const import CONF
 from custom_components.weishaupt_modbus.modbus.descriptions.all import get_entities
 from custom_components.weishaupt_modbus.modbus.descriptions.description import (
     NumberDescription,
+    SelectDescription,
     SensorDescription,
 )
 from custom_components.weishaupt_modbus.modbus.weishaupt_modbus_client.model.device import (
@@ -145,7 +146,7 @@ def test_wsb_reads_verified_settings_and_keeps_measurements_independent() -> Non
     asyncio.run(exercise())
 
 
-def test_wsb_exposes_one_control_and_writes_only_comfort() -> None:
+def test_wsb_comfort_control_writes_only_the_verified_register() -> None:
     """Write and restore the verified register without touching adjacent settings."""
 
     class WritableUnit(ReadOnlyUnit):
@@ -160,7 +161,13 @@ def test_wsb_exposes_one_control_and_writes_only_comfort() -> None:
     profile = get_entities(
         SimpleNamespace(data={CONF.WSB_READ_ONLY: True, CONF.HK2: True})
     )
-    (control,) = (item for item in profile if not isinstance(item, SensorDescription))
+    (control,) = (
+        item
+        for item in profile
+        if isinstance(item, NumberDescription)
+        and item.report_name == "heating_circuit"
+        and item.key == "comfort_room_target_temperature"
+    )
     assert isinstance(control, NumberDescription)
     assert control.report_name == "heating_circuit"
     assert control.key == "comfort_room_target_temperature"
@@ -202,6 +209,86 @@ def test_wsb_exposes_one_control_and_writes_only_comfort() -> None:
         assert control.value_fn(device) == sensor.value_fn(device) == 21.5
         assert unit.words == before
         assert unit.writes == [(41105, 210), (41105, 215)]
+
+    asyncio.run(exercise())
+
+
+def test_wsb_exposes_and_writes_only_the_documented_controls() -> None:
+    """Verify register, encoding and poll report for the complete WSB write set."""
+
+    class WritableUnit(ReadOnlyUnit):
+        def __init__(self) -> None:
+            super().__init__()
+            self.writes = []
+
+        async def write_register(self, address: int, value: int) -> None:
+            self.writes.append((address, value))
+            self.words[address] = value
+
+    expected = {
+        ("system", "operating_mode"): (40001, 3, 3),
+        ("system", "pv_setpoint"): (40002, 1234, 1234),
+        ("heating_circuit", "operation_mode"): (41103, 2, 2),
+        ("heating_circuit", "comfort_room_target_temperature"): (41105, 22.0, 220),
+        ("heating_circuit", "normal_room_target_temperature"): (41106, 19.0, 190),
+        ("heating_circuit", "lowering_room_target_temperature"): (41107, 17.5, 175),
+        ("heating_circuit", "constant_heating_temperature"): (41110, 36.5, 365),
+        ("heating_circuit", "constant_heating_lowering_temperature"): (
+            41111,
+            27.0,
+            270,
+        ),
+        ("heating_circuit", "constant_cooling_temperature"): (41112, 21.0, 210),
+        ("domestic_hot_water", "push"): (42102, 10, 10),
+        ("domestic_hot_water", "normal_temperature"): (42103, 51.5, 515),
+        ("domestic_hot_water", "lowering_temperature"): (42104, 35.0, 350),
+    }
+    reports = {
+        "system": "wsb_system_settings",
+        "heating_circuit": "wsb_heating_circuit_settings",
+        "domestic_hot_water": "wsb_hot_water_settings",
+    }
+    profile = get_entities(
+        SimpleNamespace(data={CONF.WSB_READ_ONLY: True, CONF.HK2: True})
+    )
+    controls = {
+        (item.report_name, item.key): item
+        for item in profile
+        if isinstance(item, (NumberDescription, SelectDescription))
+    }
+    assert controls.keys() == expected.keys()
+    assert all(
+        item.update_report == reports[group] for (group, _), item in controls.items()
+    )
+
+    async def exercise() -> None:
+        unit = WritableUnit()
+        device = Weishaupt(unit, tuple(reports.values()), wsb_read_only=True)
+        await device.async_update()
+        fixed_lowering = controls[
+            "heating_circuit", "constant_heating_lowering_temperature"
+        ]
+        assert fixed_lowering.value_fn(device) is None
+        for key, invalid in (
+            (("heating_circuit", "constant_heating_lowering_temperature"), 27.0),
+            (("heating_circuit", "normal_room_target_temperature"), 22.0),
+            (("heating_circuit", "lowering_room_target_temperature"), 19.0),
+            (("domestic_hot_water", "lowering_temperature"), 55.0),
+            (("system", "pv_setpoint"), 125.5),
+        ):
+            with pytest.raises(ServiceValidationError):
+                await controls[key].set_value_fn(device, invalid)
+        assert unit.writes == []
+        unit.words[41111] = 250
+        await device.async_update()
+        for key, (address, value, word) in expected.items():
+            await controls[key].set_value_fn(device, value)
+            await device.async_update()
+            assert controls[key].value_fn(device) == value
+            assert unit.writes[-1] == (address, word)
+        assert unit.writes == [
+            (address, word) for address, _, word in expected.values()
+        ]
 
     asyncio.run(exercise())
 
@@ -302,9 +389,14 @@ def test_wsb_sensors_have_names_and_options_in_all_locales() -> None:
     for locale in ("de", "en", "nl"):
         file = directory / f"{locale}.json"
         entities = json.loads(file.read_text(encoding="utf-8"))["entity"]
-        assert entities["number"]["heating_circuit_comfort_room_target_temperature"][
-            "name"
-        ]
+        for item in _profile():
+            key = f"{item.report_name}_{item.key}"
+            if isinstance(item, NumberDescription):
+                assert entities["number"][key]["name"], (locale, key)
+            if isinstance(item, SelectDescription):
+                label = entities["select"][key]
+                assert label["name"]
+                assert {option.name for option in item.enum} <= label["state"].keys()
         labels = entities["sensor"]
         for key, keys in options.items():
             assert labels.get(key, {}).get("name"), (locale, key)

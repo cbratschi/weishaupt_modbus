@@ -17,7 +17,7 @@ from .description import (
     SelectDescription,
     SensorDescription,
 )
-from .params import EMPTY, POWER, ROOM_TEMP_COMFORT, TEMPERATURE
+from .params import EMPTY, POWER, TEMPERATURE
 
 if TYPE_CHECKING:
     from custom_components.weishaupt_modbus.modbus.weishaupt_modbus_client.model.device import (
@@ -47,6 +47,31 @@ _LEGACY_CONSTANTS = {
     "constant_heating_temperature",
     "constant_heating_lowering_temperature",
     "constant_cooling_temperature",
+}
+
+# Only the writes listed in Weishaupt's WWP Modbus specification for the WSB.
+_WRITABLE = {
+    "system": {"operating_mode", "pv_setpoint"},
+    "heating_circuit": {
+        "operation_mode",
+        "comfort_room_target_temperature",
+        "normal_room_target_temperature",
+        "lowering_room_target_temperature",
+        *_LEGACY_CONSTANTS,
+    },
+    "domestic_hot_water": {"push", "normal_temperature", "lowering_temperature"},
+}
+
+# The user-facing WSB ranges differ from the generic number descriptions.
+# In particular, the factory Absenk hot-water target is 35 °C.
+_NUMBER_LIMITS = {
+    "normal_room_target_temperature": (16, 28),
+    "lowering_room_target_temperature": (16, 28),
+    "constant_heating_temperature": (7, 65),
+    "constant_heating_lowering_temperature": (7, 65),
+    "constant_cooling_temperature": (7, 30),
+    "normal_temperature": (20, 60),
+    "lowering_temperature": (10, 60),
 }
 
 
@@ -79,31 +104,76 @@ def _heating_curve(device: Weishaupt) -> float | None:
     )
 
 
-async def _set_comfort_temperature(device: Weishaupt, value: float) -> None:
-    """Validate the WSB heating circuit's allowed Comfort setting."""
-    circuit = device.heating_circuit_config
-    normal = circuit.normal_room_target_temperature
-    maximum = ROOM_TEMP_COMFORT.native_max_value
-    if normal is None or not 16 <= normal <= maximum:
-        raise ServiceValidationError("The Normal room target must be readable.")
-    minimum = max(ROOM_TEMP_COMFORT.native_min_value, normal)
-    if not minimum <= value <= maximum or value % ROOM_TEMP_COMFORT.native_step:
-        raise ServiceValidationError(
-            f"Choose a Comfort room target from {minimum:g} to {maximum:g} °C "
-            "in steps of 0.5 °C."
+_RELATED_LIMITS = {
+    "comfort_room_target_temperature": (("normal_room_target_temperature",), ()),
+    "normal_room_target_temperature": (
+        ("lowering_room_target_temperature",),
+        ("comfort_room_target_temperature",),
+    ),
+    "lowering_room_target_temperature": ((), ("normal_room_target_temperature",)),
+    "normal_temperature": (("lowering_temperature",), ()),
+    "lowering_temperature": ((), ("normal_temperature",)),
+}
+
+
+async def _set_wsb_number(
+    item: NumberDescription, device: Weishaupt, value: float
+) -> None:
+    """Check the WSB bounds and any dependent targets before a write."""
+    params = item.params
+    minimum, maximum = params.native_min_value, params.native_max_value
+    if item.key in _LEGACY_CONSTANTS and _temperature(item.value_fn, device) is None:
+        raise ServiceValidationError("The current fixed temperature is unavailable.")
+    if item.key in _RELATED_LIMITS:
+        component = (
+            device.heating_circuit_config
+            if item.report_name == "heating_circuit"
+            else device.domestic_hot_water_config
         )
-    await circuit.write("comfort_room_target_temperature", value)
+        lower_fields, upper_fields = _RELATED_LIMITS[item.key]
+        lower = [getattr(component, field) for field in lower_fields]
+        upper = [getattr(component, field) for field in upper_fields]
+        if any(bound is None or not 5 <= bound <= 80 for bound in lower + upper):
+            raise ServiceValidationError(
+                "The related temperature targets must be readable."
+            )
+        minimum = max([minimum, *lower])
+        maximum = min([maximum, *upper])
+    step = params.native_step
+    if not minimum <= value <= maximum or (value - params.native_min_value) % step:
+        raise ServiceValidationError(
+            f"Choose a value from {minimum:g} to {maximum:g} in steps of {step:g}."
+        )
+    await item.set_value_fn(device, value)
+
+
+def _number_control(
+    item: NumberDescription,
+    report: str,
+    reader: Callable[[Weishaupt], float | None],
+) -> NumberDescription:
+    params = item.params
+    if item.key in _NUMBER_LIMITS:
+        minimum, maximum = _NUMBER_LIMITS[item.key]
+        params = replace(params, native_min_value=minimum, native_max_value=maximum)
+    elif item.key == "pv_setpoint":
+        params = replace(params, native_step=1)
+    configured = replace(item, params=params, update_report=report, value_fn=reader)
+    return replace(configured, set_value_fn=partial(_set_wsb_number, configured))
 
 
 def wsb_settings(
     readings: tuple[EntityDescription, ...],
-) -> tuple[SensorDescription | NumberDescription, ...]:
-    """Keep the setting sensors and expose the verified Comfort control."""
-    settings: list[SensorDescription | NumberDescription] = []
+) -> tuple[EntityDescription, ...]:
+    """Keep the setting sensors and expose documented WSB controls."""
+    settings: list[EntityDescription] = []
     for item in readings:
         report = _REPORTS.get(item.report_name)
         if report is None:
             continue
+        writable = item.key in _WRITABLE[item.report_name]
+        if isinstance(item, SelectDescription) and writable:
+            settings.append(replace(item, update_report=report))
         if (
             isinstance(item, SelectDescription)
             and _MODES.get(item.report_name) == item.key
@@ -121,18 +191,6 @@ def wsb_settings(
                 if item.key not in _LEGACY_CONSTANTS:
                     params = replace(params, state_class=None)
                 reader = partial(_temperature, item.value_fn)
-                if (
-                    item.report_name == "heating_circuit"
-                    and item.key == "comfort_room_target_temperature"
-                ):
-                    settings.append(
-                        replace(
-                            item,
-                            update_report=report,
-                            value_fn=reader,
-                            set_value_fn=_set_comfort_temperature,
-                        )
-                    )
             elif item.report_name == "heating_circuit" and item.key == "heating_curve":
                 params = replace(EMPTY, suggested_display_precision=2)
                 reader = _heating_curve
@@ -141,6 +199,8 @@ def wsb_settings(
                 reader = item.value_fn
             else:
                 continue
+            if writable:
+                settings.append(_number_control(item, report, reader))
         else:
             continue
         settings.append(
