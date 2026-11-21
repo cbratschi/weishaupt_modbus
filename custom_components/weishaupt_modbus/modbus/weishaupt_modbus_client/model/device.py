@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 from modbus_connection.model import ComponentGroup
 
 from .domestic_hot_water import DomesticHotWaterConfig, DomesticHotWaterInput
-from .heat_pump import HeatPumpConfig, HeatPumpInput
+from .heat_pump import HeatPumpConfig, HeatPumpInput, WsbPumpSettings
 from .heating_circuit import HeatingCircuitConfigs, HeatingCircuitInputs
 from .io import IOConfig, IOInput, WsbIOInput
 from .second_heat_source import SecondHeatSourceConfig, SecondHeatSourceInput
@@ -165,6 +165,7 @@ class Weishaupt(Device):
             self.wsb_system_settings = self.system_config
             self.wsb_heating_circuit_settings = self.heating_circuit_config
             self.wsb_hot_water_settings = self.domestic_hot_water_config
+            self.wsb_pump_settings = WsbPumpSettings(unit)
             self.system = self.system_input
             self.heat_pump = self.heat_pump_input
             self.heating_circuit = self.heating_circuit_input

@@ -59,6 +59,14 @@ class HeatPumpInput(WeishauptComponent):
         return self.precise_flow_temperature - self.return_temperature
 
 
+class WsbPumpSettings(WeishauptComponent):
+    """Read the pump setpoints in the register layout confirmed on this WSB."""
+
+    heating_pump_power_setpoint = percentage(43103)
+    cooling_pump_power_setpoint = percentage(43104)
+    hot_water_pump_power_setpoint = percentage(43105)
+
+
 class HeatPumpConfig(WeishauptComponent):
     """Weishaupt heat pump configuration registers."""
 

@@ -33,9 +33,6 @@ if TYPE_CHECKING:
 
 WSB_UNVERIFIED_MODBUS_KEYS = {
     "electric_heater_1_operating_hours",
-    # On this WSB the WEM page exposes the counter by name. Register
-    # 34102 has a different documented meaning across the WWP family.
-    "electric_heater_1_switch_cycles",
     "electric_heater_2_operating_hours",
     "electric_heater_2_switch_cycles",
     "sensor_output_h1_4",
@@ -51,6 +48,8 @@ WSB_LEGACY_UNITLESS_STATISTICS = {
     "yesterday_cop",
     "monthly_cop",
     "yearly_cop",
+    # 34102 matched the E1 start count at multiple values on this WSB.
+    "electric_heater_1_switch_cycles",
 }
 
 WSB_BINARY_IO_KEYS = {

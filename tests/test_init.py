@@ -167,7 +167,8 @@ async def test_async_migrate_entry_to_version_9():
 
 
 @pytest.mark.asyncio
-async def test_async_setup_entry_without_webif() -> None:
+@pytest.mark.parametrize("wsb_profile", [False, True])
+async def test_async_setup_entry_without_webif(wsb_profile: bool) -> None:
     """Test setting up the integration without WebIF."""
     hass = MagicMock()
     hass.config.config_dir = "/config"
@@ -179,7 +180,8 @@ async def test_async_setup_entry_without_webif() -> None:
         CONF.PORT: 502,
         CONF.MAC: "AA:BB:CC:DD:EE:FF",
         CONF.UID_MIGRATION: True,
-        CONF.CB_WEBIF: False,
+        CONF.CB_WEBIF: wsb_profile,
+        CONF.WSB_READ_ONLY: wsb_profile,
         CONF.HK2: True,
         CONF.HK3: True,
         CONF.HK4: True,
@@ -197,6 +199,8 @@ async def test_async_setup_entry_without_webif() -> None:
     powermap.initialize = AsyncMock()
 
     with (
+        patch("custom_components.weishaupt_modbus.WebifConnection") as webif,
+        patch("custom_components.weishaupt_modbus.dr.async_entries_for_config_entry", return_value=[]),
         patch(
             "custom_components.weishaupt_modbus.async_get_unit",
             return_value=MagicMock(),
@@ -223,6 +227,13 @@ async def test_async_setup_entry_without_webif() -> None:
         result = await async_setup_entry(hass, entry)
 
     assert result is True
+    webif.assert_not_called()
+    assert entry.runtime_data.webif_api is None
+    assert entry.runtime_data.webif_coordinator is None
+    if wsb_profile:
+        assert hass.config_entries.async_update_entry.call_args.kwargs["data"][CONF.CB_WEBIF] is False
+    else:
+        hass.config_entries.async_update_entry.assert_not_called()
 
     mock_get_unit.assert_called_once()
     mock_weishaupt.assert_called_once()
@@ -251,7 +262,16 @@ async def test_async_setup_entry_without_webif() -> None:
         "heating_circuit3",
         "heating_circuit4",
         "heating_circuit5",
-    ]
+    ] + (
+        [
+            "wsb_system_settings",
+            "wsb_heating_circuit_settings",
+            "wsb_hot_water_settings",
+            "wsb_pump_settings",
+        ]
+        if wsb_profile
+        else []
+    )
 
 
 @pytest.mark.asyncio

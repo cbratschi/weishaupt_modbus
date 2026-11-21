@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import replace
 from functools import partial
+from operator import attrgetter
 from typing import TYPE_CHECKING
 
 from homeassistant.components.sensor import SensorDeviceClass
@@ -17,7 +18,7 @@ from .description import (
     SelectDescription,
     SensorDescription,
 )
-from .params import EMPTY, POWER, TEMPERATURE
+from .params import EMPTY, POWER, SENSOR_PERCENTAGE, TEMPERATURE
 
 if TYPE_CHECKING:
     from custom_components.weishaupt_modbus.modbus.weishaupt_modbus_client.model.device import (
@@ -31,6 +32,11 @@ _REPORTS = {
     "domestic_hot_water": "wsb_hot_water_settings",
 }
 _MODES = {"system": "operating_mode", "heating_circuit": "operation_mode"}
+_PUMP_SETPOINTS = (
+    "heating_pump_power_setpoint",
+    "hot_water_pump_power_setpoint",
+    "cooling_pump_power_setpoint",
+)
 _TEMPERATURES = {
     "heating_circuit": {
         "comfort_room_target_temperature",
@@ -224,5 +230,15 @@ def wsb_settings(
             ),
             value_fn=_push_minutes,
         )
+    )
+    settings.extend(
+        SensorDescription(
+            key=key,
+            report_name="heat_pump",
+            update_report="wsb_pump_settings",
+            params=SENSOR_PERCENTAGE,
+            value_fn=attrgetter(f"wsb_pump_settings.{key}"),
+        )
+        for key in _PUMP_SETPOINTS
     )
     return tuple(settings)

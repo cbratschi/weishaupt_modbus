@@ -5,7 +5,6 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
-from bs4 import BeautifulSoup
 from modbus_connection.exceptions import ModbusExceptionError
 import pytest
 
@@ -18,12 +17,6 @@ from custom_components.weishaupt_modbus.modbus.descriptions.description import (
 )
 from custom_components.weishaupt_modbus.modbus.weishaupt_modbus_client.model.device import (
     Weishaupt,
-)
-from custom_components.weishaupt_modbus.webif.wsb import (
-    WSB_FIELDS,
-    _heat_pump_values,
-    _hour_values,
-    _pump_values,
 )
 from homeassistant.exceptions import ServiceValidationError
 
@@ -38,6 +31,7 @@ class ReadOnlyUnit:
             31104: 350,
             32101: 520,
             32102: 487,
+            34102: 387,
             34104: 1,
             34105: 0,
             35103: 0x800A,
@@ -58,8 +52,12 @@ class ReadOnlyUnit:
             42102: 0,
             42103: 520,
             42104: 350,
+            43103: 55,
+            43104: 70,
+            43105: 51,
         }
         self.reject_hot_water_settings = False
+        self.reject_pump_settings = False
 
     async def read_input_registers(self, address: int, count: int) -> list[int]:
         """Return a contiguous block of up to five input words."""
@@ -70,6 +68,8 @@ class ReadOnlyUnit:
         """Allow holding reads and simulate a failure in the hot-water block."""
         if self.reject_hot_water_settings and address == 42101:
             raise ModbusExceptionError.from_code(2, "unsupported setting")
+        if self.reject_pump_settings and address == 43103:
+            raise ModbusExceptionError.from_code(2, "unsupported pump setting")
         return await self.read_input_registers(address, count)
 
 
@@ -142,6 +142,56 @@ def test_wsb_reads_verified_settings_and_keeps_measurements_independent() -> Non
         unit.words[42103] = 1
         assert "wsb_hot_water_settings" in (await device.async_update()).updated
         assert read("domestic_hot_water_normal_temperature") is None
+
+    asyncio.run(exercise())
+
+
+def test_wsb_reads_pump_setpoints_and_e1_starts_without_webif() -> None:
+    """Keep pump setpoints read-only and isolate a rejected pump read."""
+    unit = ReadOnlyUnit()
+    device = Weishaupt(
+        unit, ("heat_pump", "wsb_pump_settings", "second_heat_source"), wsb_read_only=True
+    )
+    sensors = {
+        item.key: item for item in _profile() if isinstance(item, SensorDescription)
+    }
+    heating = sensors["heating_pump_power_setpoint"]
+    cooling = sensors["cooling_pump_power_setpoint"]
+    water = sensors["hot_water_pump_power_setpoint"]
+    counter = sensors["electric_heater_1_switch_cycles"]
+
+    async def exercise() -> None:
+        first = await device.async_update()
+        assert not first.failed
+        assert heating.value_fn(device) == 55
+        assert cooling.value_fn(device) == 70
+        assert water.value_fn(device) == 51
+        assert counter.value_fn(device) == 387
+        assert counter.params.native_unit_of_measurement == ""
+        assert counter.params.state_class == "measurement"
+        for setting in (heating, cooling, water):
+            assert setting.report_name == "heat_pump"
+            assert setting.update_report == "wsb_pump_settings"
+            assert setting.params.native_unit_of_measurement == "%"
+            assert setting.params.state_class == "measurement"
+        assert not any(
+            item.key in (heating.key, cooling.key, water.key)
+            for item in _profile()
+            if isinstance(item, NumberDescription)
+        )
+        assert device.wsb_pump_settings.register_space == "holding"
+
+        unit.reject_pump_settings = True
+        unit.words[34102] = 388
+        second = await device.async_update()
+        assert second.failed.keys() == {"wsb_pump_settings"}
+        assert second.updated == {"heat_pump", "second_heat_source"}
+        assert counter.value_fn(device) == 388
+
+        unit.reject_pump_settings = False
+        unit.words[43105] = 253
+        assert "wsb_pump_settings" in (await device.async_update()).updated
+        assert water.value_fn(device) is None
 
     asyncio.run(exercise())
 
@@ -293,80 +343,6 @@ def test_wsb_exposes_and_writes_only_the_documented_controls() -> None:
     asyncio.run(exercise())
 
 
-def test_wsb_wem_values_ignore_missing_ambiguous_and_invalid_rows() -> None:
-    """Route only unambiguous settings and counters with the expected formats."""
-    pump = BeautifulSoup(
-        "<a>Regelungsart Heizen <small>Konstantbetrieb</small></a>"
-        "<a>Regelungsart WW Volumenstrom</a>"
-        "<a>Regelungsart Kühlen Konstantbetrieb</a><a>Regelungsart Kühlen Volumenstrom</a>"
-        "<a>Leistung Heizen 55 %</a><a>Leistung Warmwasser 253 %</a>"
-        "<a>Funktion HK-Pumpe</a><a>Freigabe bei EVU-Sperre Aus</a>",
-        "html.parser",
-    )
-    assert _pump_values(pump) == {
-        "heating_pump_power_setpoint": 55,
-        "pump_regulation_heating": "constant_speed",
-        "pump_regulation_hot_water": "flow_rate",
-        "pump_function": "heating_circuit_pump",
-        "pump_utility_lock_release": "off",
-    }
-    heater = BeautifulSoup(
-        '<div class="nav-link browseobj"><h5>Betriebsstunden E1</h5>37 h</div>'
-        '<div class="nav-link browseobj"><h5>Schaltspiele E1</h5>386</div>'
-        '<div class="nav-link browseobj"><h5>Betriebsstunden E2</h5>unbekannt</div>',
-        "html.parser",
-    )
-    assert _hour_values(heater) == {
-        "electric_heater_1_operating_hours": 37,
-        "electric_heater_1_switch_cycles": 386,
-    }
-
-
-def test_wsb_reads_actual_flow_pump_speed_and_cycle_counters() -> None:
-    """Read the live info rows separately from configured pump setpoints."""
-    page = BeautifulSoup(
-        '<div class="nav-link browseobj"><h5>Volumenstrom</h5>1.2m3/h</div>'
-        '<div class="nav-link browseobj"><h5>Drehzahl Pumpe M1</h5>57 %</div>'
-        '<div class="nav-link browseobj"><h5>Schaltspiele Verdichter</h5>1234</div>'
-        '<div class="nav-link browseobj"><h5>Schaltspiele Abtauen</h5>89</div>'
-        '<div class="nav-link browseobj"><h5>Leistung Heizen</h5>70 %</div>',
-        "html.parser",
-    )
-    assert _heat_pump_values(page) == {
-        "actual_flow_rate": 1.2,
-        "actual_pump_speed": 57,
-        "compressor_starts": 1234,
-        "defrost_cycles": 89,
-    }
-
-
-def test_wsb_heat_pump_info_keeps_zero_and_rejects_bad_rows() -> None:
-    """Keep genuine zeroes and omit duplicate, malformed and unavailable values."""
-    page = BeautifulSoup(
-        '<div class="nav-link browseobj"><h5>Volumenstrom</h5>0,0 m³/h</div>'
-        '<div class="nav-link browseobj"><h5>Drehzahl Pumpe M1</h5>0%</div>'
-        '<div class="nav-link browseobj"><h5>Schaltspiele Verdichter</h5>0</div>'
-        '<div class="nav-link browseobj"><h5>Schaltspiele Abtauen</h5>0</div>',
-        "html.parser",
-    )
-    assert _heat_pump_values(page) == {
-        "actual_flow_rate": 0.0,
-        "actual_pump_speed": 0,
-        "compressor_starts": 0,
-        "defrost_cycles": 0,
-    }
-
-    page = BeautifulSoup(
-        '<div class="nav-link browseobj"><h5>Volumenstrom</h5>-1.2 m3/h</div>'
-        '<div class="nav-link browseobj"><h5>Drehzahl Pumpe M1</h5>253 %</div>'
-        '<div class="nav-link browseobj"><h5>Schaltspiele Verdichter</h5>1234</div>'
-        '<div class="nav-link browseobj"><h5>Schaltspiele Verdichter</h5>1235</div>'
-        '<div class="nav-link browseobj"><h5>Schaltspiele Abtauen</h5>--</div>',
-        "html.parser",
-    )
-    assert _heat_pump_values(page) == {}
-
-
 def test_wsb_sensors_have_names_and_options_in_all_locales() -> None:
     """Verify that all exposed entities and new enum states have display strings."""
     directory = (
@@ -380,12 +356,6 @@ def test_wsb_sensors_have_names_and_options_in_all_locales() -> None:
         for item in _profile()
         if isinstance(item, SensorDescription)
     }
-    options.update(
-        {
-            f"{field.report}_{field.key}": [key for _, key in field.choices]
-            for field in WSB_FIELDS
-        }
-    )
     for locale in ("de", "en", "nl"):
         file = directory / f"{locale}.json"
         entities = json.loads(file.read_text(encoding="utf-8"))["entity"]

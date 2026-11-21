@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from weishaupt_webif_api import WebifConnection
 
@@ -14,10 +14,6 @@ from homeassistant.core import HomeAssistant
 from .const import CONF
 from .modbus.coordinator import WeishauptCoordinator
 from .webif.coordinator import WeishauptWebifCoordinator
-
-if TYPE_CHECKING:
-    from .webif.wsb import WsbWebifCoordinator
-
 
 @dataclass
 class MyData:
@@ -30,7 +26,6 @@ class MyData:
     weishaupt_coordinator: WeishauptCoordinator
     webif_api: WebifConnection | None = None
     webif_coordinator: WeishauptWebifCoordinator | None = None
-    wsb_coordinator: WsbWebifCoordinator | None = None
 
 
 type MyConfigEntry = ConfigEntry[MyData]

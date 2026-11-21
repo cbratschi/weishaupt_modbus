@@ -16,7 +16,6 @@ from .modbus.coordinator import WeishauptCoordinator
 from .modbus.weishaupt_modbus_client.model.device import Weishaupt
 from .webif.coordinator import WeishauptWebifCoordinator
 from .webif.description.description import WebifConnection
-from .webif.wsb import WSB_REQUEST_DELAY_SECONDS, WsbWebifCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -41,30 +40,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: MyConfigEntry) -> bool:
 
     webif_coordinator = None
     webif_api = None
-    wsb_coordinator = None
-
-    if entry.data.get(CONF.CB_WEBIF):
-        webif_options = (
-            {"request_delay": WSB_REQUEST_DELAY_SECONDS} if wsb_read_only else {}
-        )
+    if not wsb_read_only and entry.data.get(CONF.CB_WEBIF):
         webif_api = WebifConnection(
             ip=entry.data[CONF.HOST],
             user=entry.data[CONF.USERNAME],
             password=entry.data[CONF.PASSWORD],
-            **webif_options,
         )
-
-        if not wsb_read_only:
-            webif_coordinator = WeishauptWebifCoordinator(
-                hass=hass,
-                api=webif_api,
-                entry=entry,
-                mcu_lock=mcu_lock,
-            )
-            await webif_coordinator.async_config_entry_first_refresh()
-
-    if wsb_read_only:
-        wsb_coordinator = WsbWebifCoordinator(hass, webif_api, mcu_lock)
+        webif_coordinator = WeishauptWebifCoordinator(
+            hass=hass,
+            api=webif_api,
+            entry=entry,
+            mcu_lock=mcu_lock,
+        )
+        await webif_coordinator.async_config_entry_first_refresh()
     readings = [
         "system",
         "heat_pump",
@@ -84,7 +72,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: MyConfigEntry) -> bool:
         readings.append("heating_circuit5")
     if wsb_read_only:
         readings.extend(
-            ("wsb_system_settings", "wsb_heating_circuit_settings", "wsb_hot_water_settings")
+            (
+                "wsb_system_settings",
+                "wsb_heating_circuit_settings",
+                "wsb_hot_water_settings",
+                "wsb_pump_settings",
+            )
         )
 
     params = ModbusTcpParams(
@@ -106,8 +99,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: MyConfigEntry) -> bool:
         mcu_lock=mcu_lock,
     )
     await weishaupt_coordinator.async_config_entry_first_refresh()
-    if wsb_coordinator is not None:
-        await wsb_coordinator.async_refresh()
 
     entry.runtime_data = MyData(
         config_dir=hass.config.config_dir,
@@ -116,7 +107,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: MyConfigEntry) -> bool:
         weishaupt_coordinator=weishaupt_coordinator,
         webif_api=webif_api,
         webif_coordinator=webif_coordinator,
-        wsb_coordinator=wsb_coordinator,
         mcu_lock=mcu_lock,
     )
 
@@ -124,23 +114,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: MyConfigEntry) -> bool:
     await powermap.initialize()
     entry.runtime_data.powermap = powermap
 
+    updated_data = {}
     if not entry.data.get(CONF.UID_MIGRATION, False):
         migrate_entities(entry, hass)
+        updated_data[CONF.IDENTITY_SEED] = entity_identity(entry)
+        updated_data[CONF.UID_MIGRATION] = True
+    if wsb_read_only and entry.data.get(CONF.CB_WEBIF):
+        updated_data[CONF.CB_WEBIF] = False
+    if updated_data:
         hass.config_entries.async_update_entry(
-            entry,
-            data={
-                **entry.data,
-                CONF.IDENTITY_SEED: entity_identity(entry),
-                CONF.UID_MIGRATION: True,
-            },
+            entry, data={**entry.data, **updated_data}
         )
 
-    if wsb_coordinator is not None:
+    if wsb_read_only:
         registry = dr.async_get(hass)
         for device_entry in dr.async_entries_for_config_entry(registry, entry.entry_id):
             updates = {}
             if device_entry.sw_version == "Device_SW_Version":
-                updates["sw_version"] = wsb_coordinator.controller_firmware
+                updates["sw_version"] = None
             if device_entry.model == "Device_model":
                 updates["model"] = None
             if updates:

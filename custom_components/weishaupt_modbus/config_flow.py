@@ -237,7 +237,9 @@ class ConfigFlow(
                         validated_data.get(CONF.PORT, 502),
                     )
 
-                    if user_input.get(CONF.CB_WEBIF):
+                    if self._stored_data.get(CONF.WSB_READ_ONLY):
+                        self._stored_data[CONF.CB_WEBIF] = False
+                    if self._stored_data.get(CONF.CB_WEBIF):
                         return await self.async_step_webif()
 
                     return self.async_create_entry(
@@ -320,6 +322,8 @@ class ConfigFlow(
                 )
 
                 self._stored_data.update(test_data)
+                if self._stored_data.get(CONF.WSB_READ_ONLY):
+                    self._stored_data[CONF.CB_WEBIF] = False
 
                 # Route to WebIF step if it was activated (or kept active).
                 if self._stored_data.get(CONF.CB_WEBIF):
