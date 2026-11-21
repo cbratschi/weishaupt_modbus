@@ -164,11 +164,7 @@ class WeishauptNumber(WeishauptEntity, NumberEntity):
     @override
     async def async_set_native_value(self, value: float) -> None:
         """Set the value."""
-        await self.description.set_value_fn(
-            self.coordinator.device,
-            value,
-        )
-        await self.coordinator.async_request_refresh()
+        await self.coordinator.async_write_number(self.description.set_value_fn, value)
 
 
 class WeishauptSelect(WeishauptEntity, SelectEntity):

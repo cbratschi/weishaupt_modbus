@@ -1,6 +1,7 @@
 """The Update Coordinator for the ModbusItems."""
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from datetime import timedelta
 import logging
 from typing import TYPE_CHECKING, override
@@ -46,6 +47,14 @@ class WeishauptCoordinator(DataUpdateCoordinator[UpdateReport]):
         )
         self.device = device
         self._mcu_lock = mcu_lock
+
+    async def async_write_number(
+        self, setter: Callable[[Weishaupt, float], Awaitable[None]], value: float
+    ) -> None:
+        """Serialize numeric writes with polling and refresh after success."""
+        async with self._mcu_lock:
+            await setter(self.device, value)
+        await self.async_request_refresh()
 
     @override
     async def _async_update_data(self) -> UpdateReport:

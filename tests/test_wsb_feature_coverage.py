@@ -7,10 +7,12 @@ from types import SimpleNamespace
 
 from bs4 import BeautifulSoup
 from modbus_connection.exceptions import ModbusExceptionError
+import pytest
 
 from custom_components.weishaupt_modbus.const import CONF
 from custom_components.weishaupt_modbus.modbus.descriptions.all import get_entities
 from custom_components.weishaupt_modbus.modbus.descriptions.description import (
+    NumberDescription,
     SensorDescription,
 )
 from custom_components.weishaupt_modbus.modbus.weishaupt_modbus_client.model.device import (
@@ -22,6 +24,7 @@ from custom_components.weishaupt_modbus.webif.wsb import (
     _hour_values,
     _pump_values,
 )
+from homeassistant.exceptions import ServiceValidationError
 
 
 class ReadOnlyUnit:
@@ -88,9 +91,11 @@ def test_wsb_reads_verified_settings_and_keeps_measurements_independent() -> Non
         "wsb_hot_water_settings",
     )
     device = Weishaupt(unit, reports, wsb_read_only=True)
-    profile = _profile()
-    assert all(isinstance(item, SensorDescription) for item in profile)
-    sensors = {f"{item.report_name}_{item.key}": item for item in profile}
+    sensors = {
+        f"{item.report_name}_{item.key}": item
+        for item in _profile()
+        if isinstance(item, SensorDescription)
+    }
 
     def read(key):
         return sensors[key].value_fn(device)
@@ -136,6 +141,67 @@ def test_wsb_reads_verified_settings_and_keeps_measurements_independent() -> Non
         unit.words[42103] = 1
         assert "wsb_hot_water_settings" in (await device.async_update()).updated
         assert read("domestic_hot_water_normal_temperature") is None
+
+    asyncio.run(exercise())
+
+
+def test_wsb_exposes_one_control_and_writes_only_comfort() -> None:
+    """Write and restore the verified register without touching adjacent settings."""
+
+    class WritableUnit(ReadOnlyUnit):
+        def __init__(self) -> None:
+            super().__init__()
+            self.writes: list[tuple[int, int]] = []
+
+        async def write_register(self, address: int, value: int) -> None:
+            self.writes.append((address, value))
+            self.words[address] = value
+
+    profile = get_entities(
+        SimpleNamespace(data={CONF.WSB_READ_ONLY: True, CONF.HK2: True})
+    )
+    (control,) = (item for item in profile if not isinstance(item, SensorDescription))
+    assert isinstance(control, NumberDescription)
+    assert control.report_name == "heating_circuit"
+    assert control.key == "comfort_room_target_temperature"
+    assert control.update_report == "wsb_heating_circuit_settings"
+    (sensor,) = (
+        item
+        for item in profile
+        if isinstance(item, SensorDescription)
+        and item.report_name == control.report_name
+        and item.key == control.key
+    )
+
+    async def exercise() -> None:
+        unit = WritableUnit()
+        device = Weishaupt(unit, ("wsb_heating_circuit_settings",), wsb_read_only=True)
+        before = dict(unit.words)
+        await device.async_update()
+        assert control.value_fn(device) == sensor.value_fn(device) == 21.5
+        for target in (19.5, 21.25, 28.5, float("nan")):
+            with pytest.raises(ServiceValidationError):
+                await control.set_value_fn(device, target)
+        unit.words[41106] = 215
+        await device.async_update()
+        with pytest.raises(ServiceValidationError):
+            await control.set_value_fn(device, 21.0)
+        unit.words[41106] = 1
+        await device.async_update()
+        with pytest.raises(ServiceValidationError):
+            await control.set_value_fn(device, 22.0)
+        assert not unit.writes
+
+        unit.words[41106] = before[41106]
+        await device.async_update()
+        await control.set_value_fn(device, 21.0)
+        await device.async_update()
+        assert control.value_fn(device) == sensor.value_fn(device) == 21.0
+        await control.set_value_fn(device, 21.5)
+        await device.async_update()
+        assert control.value_fn(device) == sensor.value_fn(device) == 21.5
+        assert unit.words == before
+        assert unit.writes == [(41105, 210), (41105, 215)]
 
     asyncio.run(exercise())
 
@@ -223,7 +289,9 @@ def test_wsb_sensors_have_names_and_options_in_all_locales() -> None:
         / "translations"
     )
     options = {
-        f"{item.report_name}_{item.key}": item.params.options for item in _profile()
+        f"{item.report_name}_{item.key}": item.params.options
+        for item in _profile()
+        if isinstance(item, SensorDescription)
     }
     options.update(
         {
@@ -233,7 +301,11 @@ def test_wsb_sensors_have_names_and_options_in_all_locales() -> None:
     )
     for locale in ("de", "en", "nl"):
         file = directory / f"{locale}.json"
-        labels = json.loads(file.read_text(encoding="utf-8"))["entity"]["sensor"]
+        entities = json.loads(file.read_text(encoding="utf-8"))["entity"]
+        assert entities["number"]["heating_circuit_comfort_room_target_temperature"][
+            "name"
+        ]
+        labels = entities["sensor"]
         for key, keys in options.items():
             assert labels.get(key, {}).get("name"), (locale, key)
             assert set(keys) <= labels[key].get("state", {}).keys(), (locale, key)

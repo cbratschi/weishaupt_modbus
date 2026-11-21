@@ -37,6 +37,7 @@ class NumberDescription:
     params: NumberParams
     value_fn: Callable[[Weishaupt], float | None]
     set_value_fn: Callable[[Weishaupt, float], Awaitable[None]]
+    update_report: str | None = None
 
 
 @dataclass(frozen=True, kw_only=True)

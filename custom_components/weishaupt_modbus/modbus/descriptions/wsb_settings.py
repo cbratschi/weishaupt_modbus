@@ -1,4 +1,4 @@
-"""Read-only views of verified WSB configuration registers."""
+"""Expose verified WSB configuration registers."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 
 from homeassistant.components.sensor import SensorDeviceClass
 from homeassistant.const import UnitOfTime
+from homeassistant.exceptions import ServiceValidationError
 
 from .description import (
     EntityDescription,
@@ -16,7 +17,7 @@ from .description import (
     SelectDescription,
     SensorDescription,
 )
-from .params import EMPTY, POWER, TEMPERATURE
+from .params import EMPTY, POWER, ROOM_TEMP_COMFORT, TEMPERATURE
 
 if TYPE_CHECKING:
     from custom_components.weishaupt_modbus.modbus.weishaupt_modbus_client.model.device import (
@@ -78,11 +79,27 @@ def _heating_curve(device: Weishaupt) -> float | None:
     )
 
 
+async def _set_comfort_temperature(device: Weishaupt, value: float) -> None:
+    """Validate the WSB heating circuit's allowed Comfort setting."""
+    circuit = device.heating_circuit_config
+    normal = circuit.normal_room_target_temperature
+    maximum = ROOM_TEMP_COMFORT.native_max_value
+    if normal is None or not 16 <= normal <= maximum:
+        raise ServiceValidationError("The Normal room target must be readable.")
+    minimum = max(ROOM_TEMP_COMFORT.native_min_value, normal)
+    if not minimum <= value <= maximum or value % ROOM_TEMP_COMFORT.native_step:
+        raise ServiceValidationError(
+            f"Choose a Comfort room target from {minimum:g} to {maximum:g} °C "
+            "in steps of 0.5 °C."
+        )
+    await circuit.write("comfort_room_target_temperature", value)
+
+
 def wsb_settings(
     readings: tuple[EntityDescription, ...],
-) -> tuple[SensorDescription, ...]:
-    """Expose supported settings with their existing keys and stable units."""
-    sensors = []
+) -> tuple[SensorDescription | NumberDescription, ...]:
+    """Keep the setting sensors and expose the verified Comfort control."""
+    settings: list[SensorDescription | NumberDescription] = []
     for item in readings:
         report = _REPORTS.get(item.report_name)
         if report is None:
@@ -104,6 +121,18 @@ def wsb_settings(
                 if item.key not in _LEGACY_CONSTANTS:
                     params = replace(params, state_class=None)
                 reader = partial(_temperature, item.value_fn)
+                if (
+                    item.report_name == "heating_circuit"
+                    and item.key == "comfort_room_target_temperature"
+                ):
+                    settings.append(
+                        replace(
+                            item,
+                            update_report=report,
+                            value_fn=reader,
+                            set_value_fn=_set_comfort_temperature,
+                        )
+                    )
             elif item.report_name == "heating_circuit" and item.key == "heating_curve":
                 params = replace(EMPTY, suggested_display_precision=2)
                 reader = _heating_curve
@@ -114,7 +143,7 @@ def wsb_settings(
                 continue
         else:
             continue
-        sensors.append(
+        settings.append(
             SensorDescription(
                 key=item.key,
                 report_name=item.report_name,
@@ -123,7 +152,7 @@ def wsb_settings(
                 value_fn=reader,
             )
         )
-    sensors.append(
+    settings.append(
         SensorDescription(
             key="push_minutes",
             report_name="domestic_hot_water",
@@ -136,4 +165,4 @@ def wsb_settings(
             value_fn=_push_minutes,
         )
     )
-    return tuple(sensors)
+    return tuple(settings)
