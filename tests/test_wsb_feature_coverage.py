@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+from bs4 import BeautifulSoup
 from modbus_connection.exceptions import ModbusExceptionError
 import pytest
 
@@ -17,6 +18,12 @@ from custom_components.weishaupt_modbus.modbus.descriptions.description import (
 )
 from custom_components.weishaupt_modbus.modbus.weishaupt_modbus_client.model.device import (
     Weishaupt,
+)
+from custom_components.weishaupt_modbus.webif.wsb import (
+    WSB_FIELDS,
+    _heat_pump_values,
+    _hour_values,
+    _pump_values,
 )
 from homeassistant.exceptions import ServiceValidationError
 
@@ -343,6 +350,78 @@ def test_wsb_exposes_and_writes_only_the_documented_controls() -> None:
     asyncio.run(exercise())
 
 
+def test_wsb_wem_values_ignore_missing_ambiguous_and_invalid_rows() -> None:
+    """Route only unambiguous settings and counters with the expected formats."""
+    pump = BeautifulSoup(
+        "<a>Regelungsart Heizen <small>Konstantbetrieb</small></a>"
+        "<a>Regelungsart WW Volumenstrom</a>"
+        "<a>Regelungsart Kühlen Konstantbetrieb</a><a>Regelungsart Kühlen Volumenstrom</a>"
+        "<a>Leistung Heizen 55 %</a><a>Leistung Warmwasser 253 %</a>"
+        "<a>Funktion HK-Pumpe</a><a>Freigabe bei EVU-Sperre Aus</a>",
+        "html.parser",
+    )
+    assert _pump_values(pump) == {
+        "pump_regulation_heating": "constant_speed",
+        "pump_regulation_hot_water": "flow_rate",
+        "pump_function": "heating_circuit_pump",
+        "pump_utility_lock_release": "off",
+    }
+    heater = BeautifulSoup(
+        '<div class="nav-link browseobj"><h5>Betriebsstunden E1</h5>37 h</div>'
+        '<div class="nav-link browseobj"><h5>Schaltspiele E1</h5>386</div>'
+        '<div class="nav-link browseobj"><h5>Betriebsstunden E2</h5>unbekannt</div>',
+        "html.parser",
+    )
+    assert _hour_values(heater) == {
+        "electric_heater_1_operating_hours": 37,
+    }
+
+
+def test_wsb_reads_actual_flow_pump_speed_and_cycle_counters() -> None:
+    """Read the live info rows separately from configured pump setpoints."""
+    page = BeautifulSoup(
+        '<div class="nav-link browseobj"><h5>Volumenstrom</h5>1.2m3/h</div>'
+        '<div class="nav-link browseobj"><h5>Drehzahl Pumpe M1</h5>57 %</div>'
+        '<div class="nav-link browseobj"><h5>Schaltspiele Verdichter</h5>1234</div>'
+        '<div class="nav-link browseobj"><h5>Schaltspiele Abtauen</h5>89</div>'
+        '<div class="nav-link browseobj"><h5>Leistung Heizen</h5>70 %</div>',
+        "html.parser",
+    )
+    assert _heat_pump_values(page) == {
+        "actual_flow_rate": 1.2,
+        "actual_pump_speed": 57,
+        "compressor_starts": 1234,
+        "defrost_cycles": 89,
+    }
+
+
+def test_wsb_heat_pump_info_keeps_zero_and_rejects_bad_rows() -> None:
+    """Keep genuine zeroes and omit duplicate, malformed and unavailable values."""
+    page = BeautifulSoup(
+        '<div class="nav-link browseobj"><h5>Volumenstrom</h5>0,0 m³/h</div>'
+        '<div class="nav-link browseobj"><h5>Drehzahl Pumpe M1</h5>0%</div>'
+        '<div class="nav-link browseobj"><h5>Schaltspiele Verdichter</h5>0</div>'
+        '<div class="nav-link browseobj"><h5>Schaltspiele Abtauen</h5>0</div>',
+        "html.parser",
+    )
+    assert _heat_pump_values(page) == {
+        "actual_flow_rate": 0.0,
+        "actual_pump_speed": 0,
+        "compressor_starts": 0,
+        "defrost_cycles": 0,
+    }
+
+    page = BeautifulSoup(
+        '<div class="nav-link browseobj"><h5>Volumenstrom</h5>-1.2 m3/h</div>'
+        '<div class="nav-link browseobj"><h5>Drehzahl Pumpe M1</h5>253 %</div>'
+        '<div class="nav-link browseobj"><h5>Schaltspiele Verdichter</h5>1234</div>'
+        '<div class="nav-link browseobj"><h5>Schaltspiele Verdichter</h5>1235</div>'
+        '<div class="nav-link browseobj"><h5>Schaltspiele Abtauen</h5>--</div>',
+        "html.parser",
+    )
+    assert _heat_pump_values(page) == {}
+
+
 def test_wsb_sensors_have_names_and_options_in_all_locales() -> None:
     """Verify that all exposed entities and new enum states have display strings."""
     directory = (
@@ -356,6 +435,12 @@ def test_wsb_sensors_have_names_and_options_in_all_locales() -> None:
         for item in _profile()
         if isinstance(item, SensorDescription)
     }
+    webif_options = {
+        f"{field.report}_{field.key}": [key for _, key in field.choices]
+        for field in WSB_FIELDS
+    }
+    assert options.keys().isdisjoint(webif_options.keys())
+    options.update(webif_options)
     for locale in ("de", "en", "nl"):
         file = directory / f"{locale}.json"
         entities = json.loads(file.read_text(encoding="utf-8"))["entity"]

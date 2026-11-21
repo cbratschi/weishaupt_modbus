@@ -12,6 +12,7 @@ from .modbus.entities import WeishauptSensor
 from .webif.description.all import get_webif_entities
 from .webif.description.description import WebifSensorDescription
 from .webif.entity import WebifSensor
+from .webif.wsb import WSB_FIELDS, WsbWebifSensor
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -36,6 +37,12 @@ async def async_setup_entry(
             )
 
             async_add_entities([entity])
+
+    if wsb_coordinator := config_entry.runtime_data.wsb_coordinator:
+        async_add_entities(
+            WsbWebifSensor(wsb_coordinator, config_entry, field)
+            for field in WSB_FIELDS
+        )
 
     webif_coordinator = config_entry.runtime_data.webif_coordinator
     if webif_coordinator is not None:  # pragma: no cover

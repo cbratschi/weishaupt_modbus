@@ -180,7 +180,7 @@ async def test_async_setup_entry_without_webif(wsb_profile: bool) -> None:
         CONF.PORT: 502,
         CONF.MAC: "AA:BB:CC:DD:EE:FF",
         CONF.UID_MIGRATION: True,
-        CONF.CB_WEBIF: wsb_profile,
+        CONF.CB_WEBIF: False,
         CONF.WSB_READ_ONLY: wsb_profile,
         CONF.HK2: True,
         CONF.HK3: True,
@@ -230,10 +230,8 @@ async def test_async_setup_entry_without_webif(wsb_profile: bool) -> None:
     webif.assert_not_called()
     assert entry.runtime_data.webif_api is None
     assert entry.runtime_data.webif_coordinator is None
-    if wsb_profile:
-        assert hass.config_entries.async_update_entry.call_args.kwargs["data"][CONF.CB_WEBIF] is False
-    else:
-        hass.config_entries.async_update_entry.assert_not_called()
+    assert entry.runtime_data.wsb_coordinator is None
+    hass.config_entries.async_update_entry.assert_not_called()
 
     mock_get_unit.assert_called_once()
     mock_weishaupt.assert_called_once()
@@ -334,7 +332,8 @@ async def test_async_setup_entry_runs_uid_migration() -> None:
 
 
 @pytest.mark.asyncio
-async def test_async_setup_entry_with_webif() -> None:
+@pytest.mark.parametrize("wsb_profile", [False, True])
+async def test_async_setup_entry_with_webif(wsb_profile: bool) -> None:
     """Test setting up the integration with WebIF enabled."""
     hass = MagicMock()
     hass.config.config_dir = "/config"
@@ -347,6 +346,7 @@ async def test_async_setup_entry_with_webif() -> None:
         CONF.MAC: "AA:BB:CC:DD:EE:FF",
         CONF.UID_MIGRATION: True,
         CONF.CB_WEBIF: True,
+        CONF.WSB_READ_ONLY: wsb_profile,
         CONF.USERNAME: "admin",
         CONF.PASSWORD: "secret",
     }
@@ -359,6 +359,8 @@ async def test_async_setup_entry_with_webif() -> None:
 
     webif_coordinator = MagicMock()
     webif_coordinator.async_config_entry_first_refresh = AsyncMock()
+    wsb_coordinator = MagicMock()
+    wsb_coordinator.async_refresh = AsyncMock()
 
     modbus_coordinator = MagicMock()
     modbus_coordinator.async_config_entry_first_refresh = AsyncMock()
@@ -375,6 +377,14 @@ async def test_async_setup_entry_with_webif() -> None:
             "custom_components.weishaupt_modbus.WeishauptWebifCoordinator",
             return_value=webif_coordinator,
         ) as mock_webif_coordinator,
+        patch(
+            "custom_components.weishaupt_modbus.WsbWebifCoordinator",
+            return_value=wsb_coordinator,
+        ) as mock_wsb_coordinator,
+        patch(
+            "custom_components.weishaupt_modbus.dr.async_entries_for_config_entry",
+            return_value=[],
+        ),
         patch(
             "custom_components.weishaupt_modbus.async_get_unit",
             return_value=MagicMock(),
@@ -398,19 +408,28 @@ async def test_async_setup_entry_with_webif() -> None:
 
     assert result is True
 
+    webif_options = {"request_delay": 1.0} if wsb_profile else {}
     mock_webif.assert_called_once_with(
         ip="192.168.1.100",
         user="admin",
         password="secret",
+        **webif_options,
     )
 
-    mock_webif_coordinator.assert_called_once()
-
-    webif_coordinator.async_config_entry_first_refresh.assert_awaited_once()
     modbus_coordinator.async_config_entry_first_refresh.assert_awaited_once()
-
     assert entry.runtime_data.webif_api is webif_api
-    assert entry.runtime_data.webif_coordinator is webif_coordinator
+    if wsb_profile:
+        mock_webif_coordinator.assert_not_called()
+        mock_wsb_coordinator.assert_called_once()
+        wsb_coordinator.async_refresh.assert_awaited_once()
+        assert entry.runtime_data.wsb_coordinator is wsb_coordinator
+        assert entry.runtime_data.webif_coordinator is None
+    else:
+        mock_wsb_coordinator.assert_not_called()
+        mock_webif_coordinator.assert_called_once()
+        webif_coordinator.async_config_entry_first_refresh.assert_awaited_once()
+        assert entry.runtime_data.wsb_coordinator is None
+        assert entry.runtime_data.webif_coordinator is webif_coordinator
 
 
 @pytest.mark.asyncio
