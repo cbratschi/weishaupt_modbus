@@ -987,6 +987,18 @@
             }
         },
         "sensor": {
+            "heat_pump_actual_flow_rate": {
+                "name": "Actual water flow (B10)"
+            },
+            "heat_pump_actual_pump_speed": {
+                "name": "Actual pump speed (M1)"
+            },
+            "heat_pump_compressor_starts": {
+                "name": "Compressor starts"
+            },
+            "heat_pump_defrost_cycles": {
+                "name": "Defrost cycles"
+            },
             "heat_pump_heating_pump_power_setpoint": {
                 "name": "Heating pump power setpoint"
             },

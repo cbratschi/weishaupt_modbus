@@ -987,6 +987,18 @@
             }
         },
         "sensor": {
+            "heat_pump_actual_flow_rate": {
+                "name": "Actueel waterdebiet (B10)"
+            },
+            "heat_pump_actual_pump_speed": {
+                "name": "Actueel pomptoerental (M1)"
+            },
+            "heat_pump_compressor_starts": {
+                "name": "Compressorstarts"
+            },
+            "heat_pump_defrost_cycles": {
+                "name": "Ontdooicycli"
+            },
             "heat_pump_heating_pump_power_setpoint": {
                 "name": "Pompvermogen verwarmen"
             },

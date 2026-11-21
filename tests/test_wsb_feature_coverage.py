@@ -18,6 +18,7 @@ from custom_components.weishaupt_modbus.modbus.weishaupt_modbus_client.model.dev
 )
 from custom_components.weishaupt_modbus.webif.wsb import (
     WSB_FIELDS,
+    _heat_pump_values,
     _hour_values,
     _pump_values,
 )
@@ -166,6 +167,51 @@ def test_wsb_wem_values_ignore_missing_ambiguous_and_invalid_rows() -> None:
         "electric_heater_1_operating_hours": 37,
         "electric_heater_1_switch_cycles": 386,
     }
+
+
+def test_wsb_reads_actual_flow_pump_speed_and_cycle_counters() -> None:
+    """Read the live info rows separately from configured pump setpoints."""
+    page = BeautifulSoup(
+        '<div class="nav-link browseobj"><h5>Volumenstrom</h5>1.2m3/h</div>'
+        '<div class="nav-link browseobj"><h5>Drehzahl Pumpe M1</h5>57 %</div>'
+        '<div class="nav-link browseobj"><h5>Schaltspiele Verdichter</h5>1234</div>'
+        '<div class="nav-link browseobj"><h5>Schaltspiele Abtauen</h5>89</div>'
+        '<div class="nav-link browseobj"><h5>Leistung Heizen</h5>70 %</div>',
+        "html.parser",
+    )
+    assert _heat_pump_values(page) == {
+        "actual_flow_rate": 1.2,
+        "actual_pump_speed": 57,
+        "compressor_starts": 1234,
+        "defrost_cycles": 89,
+    }
+
+
+def test_wsb_heat_pump_info_keeps_zero_and_rejects_bad_rows() -> None:
+    """Keep genuine zeroes and omit duplicate, malformed and unavailable values."""
+    page = BeautifulSoup(
+        '<div class="nav-link browseobj"><h5>Volumenstrom</h5>0,0 m³/h</div>'
+        '<div class="nav-link browseobj"><h5>Drehzahl Pumpe M1</h5>0%</div>'
+        '<div class="nav-link browseobj"><h5>Schaltspiele Verdichter</h5>0</div>'
+        '<div class="nav-link browseobj"><h5>Schaltspiele Abtauen</h5>0</div>',
+        "html.parser",
+    )
+    assert _heat_pump_values(page) == {
+        "actual_flow_rate": 0.0,
+        "actual_pump_speed": 0,
+        "compressor_starts": 0,
+        "defrost_cycles": 0,
+    }
+
+    page = BeautifulSoup(
+        '<div class="nav-link browseobj"><h5>Volumenstrom</h5>-1.2 m3/h</div>'
+        '<div class="nav-link browseobj"><h5>Drehzahl Pumpe M1</h5>253 %</div>'
+        '<div class="nav-link browseobj"><h5>Schaltspiele Verdichter</h5>1234</div>'
+        '<div class="nav-link browseobj"><h5>Schaltspiele Verdichter</h5>1235</div>'
+        '<div class="nav-link browseobj"><h5>Schaltspiele Abtauen</h5>--</div>',
+        "html.parser",
+    )
+    assert _heat_pump_values(page) == {}
 
 
 def test_wsb_sensors_have_names_and_options_in_all_locales() -> None:
