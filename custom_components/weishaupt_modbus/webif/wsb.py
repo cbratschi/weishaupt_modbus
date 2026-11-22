@@ -1,6 +1,7 @@
 """Read optional WSB values that do not have a verified Modbus mapping."""
 
 import asyncio
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import timedelta
 import logging
@@ -42,6 +43,7 @@ _LOGGER = logging.getLogger(__name__)
 _ROOT = "/settings_export.html"
 WSB_REQUEST_DELAY_SECONDS = 1.0
 _REQUEST_TIMEOUT = 10
+_MAX_EXPORT_REQUESTS = 7
 _EXPORT_LINK = re.compile(r"/settings_export\.html\?stack=[0-9a-fA-F,]+")
 _CONTROLLER_FIRMWARE = re.compile(r"\bWWP-CPU COM V(\d+\.\d+) Rev\.\s*(\d+)\b")
 _FLOW_VALUE = re.compile(r"(\d+(?:[.,]\d+)?)\s*m\s*[3³]\s*/\s*h")
@@ -221,17 +223,18 @@ _HEATING_CIRCUIT_INFO = (
 WSB_FIELDS = _PUMP_SETTINGS + _HEATER_COUNTERS + _HEAT_PUMP_INFO + _HEATING_CIRCUIT_INFO
 
 
-def _menu(page: BeautifulSoup, label: str) -> str:
+def _menu(page: BeautifulSoup, label: str, *, parent: str | None = None) -> str:
     links = [
         str(link["href"])
         for link in page.find_all("a", href=_EXPORT_LINK)
         if _EXPORT_LINK.fullmatch(str(link["href"]))
         and " ".join(link.stripped_strings) == label
+        and (parent is None or str(link["href"]).startswith(parent + ","))
     ]
     if not links:
         raise ValueError(f"Missing WEM menu {label}")
-    # This controller presents the same second-generator menu twice. Its last
-    # link contains the full page, including the operating-hour counters.
+    # The navigation repeats top-level labels on child pages. Scope a child
+    # lookup to its own stack before preferring the last matching link.
     return links[-1]
 
 
@@ -314,6 +317,27 @@ def _heating_circuit_values(page: BeautifulSoup) -> dict[str, int | float | str]
     return _info_values(page, _HEATING_CIRCUIT_INFO)
 
 
+_REPORT_PAGES = (
+    ("Wärmepumpe", (("Pumpe", _pump_values),)),
+    (
+        "Info",
+        (
+            ("2. WEZ", _hour_values),
+            ("Wärmepumpe", _heat_pump_values),
+            ("Heizkreis", _heating_circuit_values),
+        ),
+    ),
+)
+
+
+@dataclass(frozen=True)
+class _ReportRoute:
+    """A leaf URL that has returned recognized data on this controller."""
+
+    path: str
+    fields: frozenset[str]
+
+
 class WsbWebifCoordinator(DataUpdateCoordinator[dict[str, int | float | str]]):
     """Keep WEM availability independent of the Modbus coordinator."""
 
@@ -336,10 +360,13 @@ class WsbWebifCoordinator(DataUpdateCoordinator[dict[str, int | float | str]]):
         self.api = api
         self.mcu_lock = mcu_lock
         self.controller_firmware: str | None = None
+        self._routes: dict[tuple[str, str], _ReportRoute] = {}
 
     def _update_controller_firmware(self, firmware: str) -> None:
         if firmware == self.controller_firmware:
             return
+        if self.controller_firmware is not None:
+            self._routes.clear()
         self.controller_firmware = firmware
         if self.config_entry is not None:
             registry = dr.async_get(self.hass)
@@ -365,47 +392,107 @@ class WsbWebifCoordinator(DataUpdateCoordinator[dict[str, int | float | str]]):
             response = await self.api._request("GET", path)  # noqa: SLF001
         if response.status_code != 200:
             raise ValueError("WEM export unavailable")
-        return BeautifulSoup(response.text, "html.parser")
+        page = BeautifulSoup(response.text, "html.parser")
+        if page.select_one('input[name="pass"]') or (
+            page.title and page.title.get_text(strip=True).casefold() == "login"
+        ):
+            raise ValueError("WEM export returned a login page")
+        return page
 
     async def _async_update_data(self) -> dict[str, int | float | str]:
         if self.api is None:
             return {}
+
+        requests = 0
+
+        async def get_page(path: str) -> BeautifulSoup:
+            nonlocal requests
+            if requests >= _MAX_EXPORT_REQUESTS:
+                raise ValueError("WEM export request budget exhausted")
+            requests += 1
+            return await self._get_page(path)
+
         values: dict[str, int | float | str] = {}
         try:
-            root = await self._get_page(_ROOT)
+            root = await get_page(_ROOT)
         except _WEM_ERRORS as err:
             raise UpdateFailed(f"WEM export unavailable ({type(err).__name__})") from None
         if match := _CONTROLLER_FIRMWARE.search(root.get_text(" ", strip=True)):
             self._update_controller_firmware(f"WWP-CPU COM V{match[1]} R{match[2]}")
-        for first, pages in (
-            ("Wärmepumpe", (("Pumpe", _pump_values),)),
-            (
-                "Info",
-                (
-                    ("2. WEZ", _hour_values),
-                    ("Wärmepumpe", _heat_pump_values),
-                    ("Heizkreis", _heating_circuit_values),
-                ),
-            ),
-        ):
-            try:
-                section = await self._get_page(_menu(root, first))
-            except _WEM_ERRORS as err:
-                _LOGGER.debug(
-                    "WSB WEM menu %s unavailable (%s)", first, type(err).__name__
-                )
-                continue
-            for second, parse in pages:
+        retry: list[
+            tuple[
+                tuple[str, str],
+                _ReportRoute,
+                Callable[[BeautifulSoup], dict[str, int | float | str]],
+            ]
+        ] = []
+        for first, pages in _REPORT_PAGES:
+            section = None
+            if any((first, second) not in self._routes for second, _ in pages):
                 try:
-                    page = await self._get_page(_menu(section, second))
-                    values.update(parse(page))
+                    parent = _menu(root, first)
+                    section = await get_page(parent), parent
                 except _WEM_ERRORS as err:
+                    _LOGGER.debug(
+                        "WSB WEM menu %s unavailable (%s)", first, type(err).__name__
+                    )
+            for second, parse in pages:
+                key = (first, second)
+                cached = self._routes.get(key)
+                try:
+                    if cached is not None:
+                        path = cached.path
+                    elif section is not None:
+                        page, parent = section
+                        path = _menu(page, second, parent=parent)
+                    else:
+                        continue
+                    current = parse(await get_page(path))
+                except _WEM_ERRORS as err:
+                    if isinstance(err, ValueError):
+                        self._routes.pop(key, None)
                     _LOGGER.debug(
                         "WSB WEM menu %s/%s unavailable (%s)",
                         first,
                         second,
                         type(err).__name__,
                     )
+                    continue
+                if current:
+                    fields = frozenset(current)
+                    self._routes[key] = _ReportRoute(
+                        path, cached.fields | fields if cached else fields
+                    )
+                    values.update(current)
+                if cached is not None and not cached.fields <= current.keys():
+                    _LOGGER.debug(
+                        "WSB WEM page %s/%s omitted %d previously reported fields",
+                        first,
+                        second,
+                        len(cached.fields - current.keys()),
+                    )
+                    if not current:
+                        self._routes.pop(key, None)
+                    retry.append((key, cached, parse))
+
+        # Warm polls normally follow four proven leaf URLs after the root.
+        # Rediscovery uses the saved budget first. Only incomplete HTML can
+        # use an unused slot, with at most one retry per previously read leaf.
+        for key, cached, parse in retry:
+            if requests >= _MAX_EXPORT_REQUESTS:
+                break
+            try:
+                current = parse(await get_page(cached.path))
+            except _WEM_ERRORS as err:
+                _LOGGER.debug(
+                    "WSB WEM page retry %s/%s failed (%s)", *key, type(err).__name__
+                )
+                continue
+            if current:
+                values.update(current)
+                self._routes[key] = _ReportRoute(
+                    cached.path, cached.fields | frozenset(current)
+                )
         if not values:
             raise UpdateFailed("No supported WSB fields in WEM export")
         return values
