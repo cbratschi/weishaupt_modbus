@@ -296,7 +296,7 @@ def test_wsb_exposes_and_writes_only_the_documented_controls() -> None:
             270,
         ),
         ("heating_circuit", "constant_cooling_temperature"): (41112, 21.0, 210),
-        ("domestic_hot_water", "push"): (42102, 10, 10),
+        ("domestic_hot_water", "push"): (42102, 240, 240),
         ("domestic_hot_water", "normal_temperature"): (42103, 51.5, 515),
         ("domestic_hot_water", "lowering_temperature"): (42104, 35.0, 350),
     }
@@ -314,6 +314,9 @@ def test_wsb_exposes_and_writes_only_the_documented_controls() -> None:
         if isinstance(item, (NumberDescription, SelectDescription))
     }
     assert controls.keys() == expected.keys()
+    push = controls["domestic_hot_water", "push"]
+    assert isinstance(push, SelectDescription)
+    assert push.enum["domestic_hot_water_push_240"].value == 240
     assert all(
         item.update_report == reports[group] for (group, _), item in controls.items()
     )
