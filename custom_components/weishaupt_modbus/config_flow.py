@@ -75,7 +75,6 @@ class ConfigFlow(
 
     VERSION = 9
     MINOR_VERSION = 1
-    CONNECTION_CLASS = config_entries.CONN_CLASS_LOCAL_PUSH
 
     def __init__(self) -> None:
         """Initialize the flow."""
