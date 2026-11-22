@@ -11,6 +11,11 @@ def calculate_thermal_power(
     powermap: PowerMap,
 ) -> float | None:
     """Calculate thermal power."""
+    if (
+        not coordinator.last_update_success
+        or not {"heat_pump", "system"} <= coordinator.data.updated
+    ):
+        return None
     device = coordinator.device
 
     power_request = device.heat_pump_input.power_request

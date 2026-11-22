@@ -988,6 +988,61 @@
             }
         },
         "sensor": {
+        "heat_pump_unverified_temperature_33107": {
+            "name": "Temperatuur (register 33107, niet bevestigd)"
+        },
+        "heat_pump_diverter_valve_position": {
+            "name": "Stand omschakelventiel",
+            "state": {
+                "heating_circuit": "Verwarmingscircuit",
+                "hot_water": "Warm water"
+            }
+        },
+        "heat_pump_compressor_frequency_target": {
+            "name": "Doelfrequentie compressor"
+        },
+        "heat_pump_compressor_frequency_actual": {
+            "name": "Werkelijke compressorfrequentie"
+        },
+        "heat_pump_compressor_operating_hours": {
+            "name": "Bedrijfsuren compressor"
+        },
+        "heat_pump_reported_target_temperature": {
+            "name": "Doeltemperatuur (WEM Lokal)"
+        },
+        "heat_pump_outdoor_heat_exchanger_inlet_temperature": {
+            "name": "Inlaat warmtewisselaar buitenunit (OCT)"
+        },
+        "heat_pump_outdoor_heat_exchanger_middle_temperature": {
+            "name": "Midden warmtewisselaar buitenunit (OMT)"
+        },
+        "heat_pump_compressor_discharge_temperature": {
+            "name": "Persgastemperatuur (CTT)"
+        },
+        "heat_pump_indoor_heat_exchanger_temperature": {
+            "name": "Warmtewisselaar binnenunit (B12)"
+        },
+        "heat_pump_indoor_refrigerant_temperature": {
+            "name": "Koudemiddeltemperatuur binnenunit (B8)"
+        },
+        "heat_pump_system_unit_version": {
+            "name": "Versie systeemeenheid (WWP-SG)"
+        },
+        "heat_pump_control_board_version": {
+            "name": "Versie regelprint (WWP-CPU)"
+        },
+        "heat_pump_outdoor_unit_variant": {
+            "name": "Uitvoering buitenunit"
+        },
+        "heating_circuit_outdoor_temperature_average": {
+            "name": "Gemiddelde buitentemperatuur"
+        },
+        "heating_circuit_outdoor_temperature_long_term": {
+            "name": "Langetermijnwaarde buitentemperatuur"
+        },
+        "heating_circuit_reported_supply_temperature": {
+            "name": "Aanvoertemperatuur (WEM Lokal)"
+        },
             "heat_pump_actual_flow_rate": {
                 "name": "Actueel waterdebiet (B10)"
             },

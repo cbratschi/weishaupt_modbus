@@ -90,6 +90,8 @@ def _sensor_digital_input(
 
 def _wsb_sensor(description: SensorDescription) -> SensorDescription:
     """Keep the established WSB Recorder contract and heater state values."""
+    if description.key == "compressor_suction_temperature":
+        return replace(description, translation_key="heat_pump_unverified_temperature_33107")
     if (
         description.key
         in WSB_LEGACY_UNITLESS_STATISTICS | WSB_BINARY_IO_KEYS | WSB_SENSOR_DIGITAL_KEYS

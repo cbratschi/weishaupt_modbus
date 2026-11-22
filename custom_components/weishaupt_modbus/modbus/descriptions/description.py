@@ -26,6 +26,7 @@ class SensorDescription:
         | None
     ) = None
     update_report: str | None = None
+    translation_key: str | None = None
 
 
 @dataclass(frozen=True, kw_only=True)

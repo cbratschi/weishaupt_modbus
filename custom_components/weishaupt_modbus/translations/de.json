@@ -988,6 +988,61 @@
             }
         },
         "sensor": {
+        "heat_pump_unverified_temperature_33107": {
+            "name": "Temperatur (Register 33107, ungeprüft)"
+        },
+        "heat_pump_diverter_valve_position": {
+            "name": "Stellung Umschaltventil",
+            "state": {
+                "heating_circuit": "Heizkreis",
+                "hot_water": "Warmwasser"
+            }
+        },
+        "heat_pump_compressor_frequency_target": {
+            "name": "Verdichterfrequenz Soll"
+        },
+        "heat_pump_compressor_frequency_actual": {
+            "name": "Verdichterfrequenz Ist"
+        },
+        "heat_pump_compressor_operating_hours": {
+            "name": "Betriebsstunden Verdichter"
+        },
+        "heat_pump_reported_target_temperature": {
+            "name": "Solltemperatur (WEM Lokal)"
+        },
+        "heat_pump_outdoor_heat_exchanger_inlet_temperature": {
+            "name": "Wärmetauscher Aussengerät Eintritt (OCT)"
+        },
+        "heat_pump_outdoor_heat_exchanger_middle_temperature": {
+            "name": "Wärmetauscher Aussengerät Mitte (OMT)"
+        },
+        "heat_pump_compressor_discharge_temperature": {
+            "name": "Druckgastemperatur (CTT)"
+        },
+        "heat_pump_indoor_heat_exchanger_temperature": {
+            "name": "Wärmetauscher Innengerät (B12)"
+        },
+        "heat_pump_indoor_refrigerant_temperature": {
+            "name": "Kältemittel Innengerät (B8)"
+        },
+        "heat_pump_system_unit_version": {
+            "name": "Version Systemgerät (WWP-SG)"
+        },
+        "heat_pump_control_board_version": {
+            "name": "Version Geräteelektronik (WWP-CPU)"
+        },
+        "heat_pump_outdoor_unit_variant": {
+            "name": "Variante Aussengerät"
+        },
+        "heating_circuit_outdoor_temperature_average": {
+            "name": "Aussentemperatur Mittelwert"
+        },
+        "heating_circuit_outdoor_temperature_long_term": {
+            "name": "Aussentemperatur Langzeitwert"
+        },
+        "heating_circuit_reported_supply_temperature": {
+            "name": "Vorlauftemperatur (WEM Lokal)"
+        },
             "heat_pump_actual_flow_rate": {
                 "name": "Volumenstrom (B10)"
             },

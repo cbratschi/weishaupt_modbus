@@ -988,6 +988,61 @@
             }
         },
         "sensor": {
+        "heat_pump_unverified_temperature_33107": {
+            "name": "Temperature (register 33107, unverified)"
+        },
+        "heat_pump_diverter_valve_position": {
+            "name": "Diverter valve position",
+            "state": {
+                "heating_circuit": "Heating circuit",
+                "hot_water": "Hot water"
+            }
+        },
+        "heat_pump_compressor_frequency_target": {
+            "name": "Compressor frequency target"
+        },
+        "heat_pump_compressor_frequency_actual": {
+            "name": "Compressor frequency actual"
+        },
+        "heat_pump_compressor_operating_hours": {
+            "name": "Compressor operating hours"
+        },
+        "heat_pump_reported_target_temperature": {
+            "name": "Target temperature (WEM Lokal)"
+        },
+        "heat_pump_outdoor_heat_exchanger_inlet_temperature": {
+            "name": "Outdoor heat exchanger inlet (OCT)"
+        },
+        "heat_pump_outdoor_heat_exchanger_middle_temperature": {
+            "name": "Outdoor heat exchanger middle (OMT)"
+        },
+        "heat_pump_compressor_discharge_temperature": {
+            "name": "Compressor discharge temperature (CTT)"
+        },
+        "heat_pump_indoor_heat_exchanger_temperature": {
+            "name": "Indoor heat exchanger (B12)"
+        },
+        "heat_pump_indoor_refrigerant_temperature": {
+            "name": "Indoor refrigerant temperature (B8)"
+        },
+        "heat_pump_system_unit_version": {
+            "name": "System unit version (WWP-SG)"
+        },
+        "heat_pump_control_board_version": {
+            "name": "Control board version (WWP-CPU)"
+        },
+        "heat_pump_outdoor_unit_variant": {
+            "name": "Outdoor unit variant"
+        },
+        "heating_circuit_outdoor_temperature_average": {
+            "name": "Average outdoor temperature"
+        },
+        "heating_circuit_outdoor_temperature_long_term": {
+            "name": "Long-term outdoor temperature"
+        },
+        "heating_circuit_reported_supply_temperature": {
+            "name": "Supply temperature (WEM Lokal)"
+        },
             "heat_pump_actual_flow_rate": {
                 "name": "Actual water flow (B10)"
             },

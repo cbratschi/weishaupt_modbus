@@ -1,15 +1,9 @@
 """Tests for integration initialization."""
 
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from custom_components.weishaupt_modbus import (
-    PLATFORMS,
-    async_migrate_entry,
-    async_unload_entry,
-    update_listener,
-)
-from custom_components.weishaupt_modbus.const import CONF, CONST
 import pytest
 
 from custom_components.weishaupt_modbus import (
@@ -19,6 +13,7 @@ from custom_components.weishaupt_modbus import (
     async_unload_entry,
     update_listener,
 )
+from custom_components.weishaupt_modbus.const import CONF
 
 
 @pytest.mark.asyncio
@@ -41,6 +36,7 @@ async def test_async_unload_entry_without_webif():
     hass = MagicMock()
     entry = MagicMock()
     entry.runtime_data.webif_api = None
+    entry.runtime_data.wsb_coordinator = None
     hass.config_entries.async_unload_platforms = AsyncMock(return_value=True)
 
     result = await async_unload_entry(hass, entry)
@@ -61,6 +57,7 @@ async def test_async_unload_entry_with_webif():
     webif_api = MagicMock()
     webif_api.close = AsyncMock()
     entry.runtime_data.webif_api = webif_api
+    entry.runtime_data.wsb_coordinator = None
 
     hass.config_entries.async_unload_platforms = AsyncMock(return_value=True)
 
@@ -361,6 +358,14 @@ async def test_async_setup_entry_with_webif(wsb_profile: bool) -> None:
     webif_coordinator.async_config_entry_first_refresh = AsyncMock()
     wsb_coordinator = MagicMock()
     wsb_coordinator.async_refresh = AsyncMock()
+    tasks = []
+
+    def start_background(_hass, coroutine, _name):
+        task = asyncio.create_task(coroutine)
+        tasks.append(task)
+        return task
+
+    entry.async_create_background_task = start_background
 
     modbus_coordinator = MagicMock()
     modbus_coordinator.async_config_entry_first_refresh = AsyncMock()
@@ -421,6 +426,9 @@ async def test_async_setup_entry_with_webif(wsb_profile: bool) -> None:
     if wsb_profile:
         mock_webif_coordinator.assert_not_called()
         mock_wsb_coordinator.assert_called_once()
+        wsb_coordinator.async_refresh.assert_not_awaited()
+        assert len(tasks) == 1
+        await tasks[0]
         wsb_coordinator.async_refresh.assert_awaited_once()
         assert entry.runtime_data.wsb_coordinator is wsb_coordinator
         assert entry.runtime_data.webif_coordinator is None

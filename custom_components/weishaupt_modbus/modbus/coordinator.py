@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, override
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .weishaupt_modbus_client.model.device import Weishaupt
 
@@ -47,6 +47,7 @@ class WeishauptCoordinator(DataUpdateCoordinator[UpdateReport]):
         )
         self.device = device
         self._mcu_lock = mcu_lock
+        self.failed_reports: dict[str, str] = {}
 
     async def async_write_setting[Setting: (float, int)](
         self, setter: Callable[[Weishaupt, Setting], Awaitable[None]], value: Setting
@@ -62,10 +63,18 @@ class WeishauptCoordinator(DataUpdateCoordinator[UpdateReport]):
         async with self._mcu_lock:
             report = await self.device.async_update()
 
-        if report.failed:
+        failed = {name: type(error).__name__ for name, error in report.failed.items()}
+        changed = failed != self.failed_reports
+        self.failed_reports = failed
+        if failed and not report.updated:
+            raise UpdateFailed("No Weishaupt Modbus reports returned data")
+
+        if failed and changed:
             _LOGGER.warning(
                 "Failed to update Weishaupt reports: %s",
-                ", ".join(f"{name}: {error}" for name, error in report.failed.items()),
+                ", ".join(f"{name}: {category}" for name, category in sorted(failed.items())),
             )
+        elif changed:
+            _LOGGER.info("All Weishaupt Modbus reports recovered")
 
         return report

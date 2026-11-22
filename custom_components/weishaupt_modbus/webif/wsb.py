@@ -21,12 +21,21 @@ from homeassistant.components.sensor import (
     SensorEntity,
     SensorStateClass,
 )
-from homeassistant.const import PERCENTAGE, UnitOfTime, UnitOfVolumeFlowRate
+from homeassistant.const import (
+    PERCENTAGE,
+    EntityCategory,
+    UnitOfFrequency,
+    UnitOfTemperature,
+    UnitOfTime,
+    UnitOfVolumeFlowRate,
+)
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import (
     CoordinatorEntity,
     DataUpdateCoordinator,
+    UpdateFailed,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -36,6 +45,10 @@ _REQUEST_TIMEOUT = 10
 _EXPORT_LINK = re.compile(r"/settings_export\.html\?stack=[0-9a-fA-F,]+")
 _CONTROLLER_FIRMWARE = re.compile(r"\bWWP-CPU COM V(\d+\.\d+) Rev\.\s*(\d+)\b")
 _FLOW_VALUE = re.compile(r"(\d+(?:[.,]\d+)?)\s*m\s*[3³]\s*/\s*h")
+_TEMPERATURE_VALUE = re.compile(r"([+−-]?\d+(?:[.,]\d+)?)\s*°\s*C")
+_FREQUENCY_VALUE = re.compile(r"(\d+(?:[.,]\d+)?)\s*Hz")
+_UNSIGNED_VALUE = re.compile(r"[0-9]{1,12}")
+_WEM_ERRORS = (OSError, ValueError, WeishauptWebifError)
 
 
 @dataclass(frozen=True)
@@ -48,7 +61,20 @@ class WsbField:
     unit: str | None = None
     choices: tuple[tuple[str, str], ...] = ()
     device_class: SensorDeviceClass | None = None
-    state_class: SensorStateClass = SensorStateClass.MEASUREMENT
+    state_class: SensorStateClass | None = SensorStateClass.MEASUREMENT
+    aliases: tuple[str, ...] = ()
+    text_pattern: str | None = None
+
+
+def _temperature(report: str, key: str, label: str, *aliases: str) -> WsbField:
+    return WsbField(
+        report,
+        key,
+        label,
+        UnitOfTemperature.CELSIUS,
+        device_class=SensorDeviceClass.TEMPERATURE,
+        aliases=aliases,
+    )
 
 
 _PUMP_REGULATION = (
@@ -122,8 +148,77 @@ _HEAT_PUMP_INFO = (
         "Schaltspiele Abtauen",
         state_class=SensorStateClass.TOTAL_INCREASING,
     ),
+    WsbField(
+        "heat_pump",
+        "diverter_valve_position",
+        "Stellung Umschaltventil",
+        choices=(("Heizkreis", "heating_circuit"), ("Warmwasser", "hot_water")),
+    ),
+    WsbField(
+        "heat_pump",
+        "compressor_frequency_target",
+        "Soll Frequenz Verdichter",
+        UnitOfFrequency.HERTZ,
+        device_class=SensorDeviceClass.FREQUENCY,
+    ),
+    WsbField(
+        "heat_pump",
+        "compressor_frequency_actual",
+        "Ist Frequenz Verdichter",
+        UnitOfFrequency.HERTZ,
+        device_class=SensorDeviceClass.FREQUENCY,
+    ),
+    WsbField(
+        "heat_pump",
+        "compressor_operating_hours",
+        "Betriebsstd. Verdichter",
+        UnitOfTime.HOURS,
+        state_class=SensorStateClass.TOTAL_INCREASING,
+    ),
+    _temperature("heat_pump", "reported_target_temperature", "Solltemperatur"),
+    _temperature(
+        "heat_pump",
+        "outdoor_heat_exchanger_inlet_temperature",
+        "Wärmetauscher AG Eintritt",
+        "Wärmetauscher AG Eintrit",
+    ),
+    _temperature(
+        "heat_pump", "outdoor_heat_exchanger_middle_temperature", "Wärmetauscher AG Mitte"
+    ),
+    _temperature(
+        "heat_pump", "compressor_discharge_temperature", "Druckgas", "Druckgastemperatur"
+    ),
+    _temperature("heat_pump", "indoor_heat_exchanger_temperature", "Wärmetauscher Innen"),
+    _temperature("heat_pump", "indoor_refrigerant_temperature", "Kältemittel Innen"),
+    WsbField(
+        "heat_pump",
+        "system_unit_version",
+        "Version WWP-SG",
+        state_class=None,
+        text_pattern=r"V\d+(?:\.\d+)+(?:\s+(?:R|Rev\.\s*)\d+)?",
+    ),
+    WsbField(
+        "heat_pump",
+        "control_board_version",
+        "Version WWP-CPU",
+        state_class=None,
+        text_pattern=r"V\d+(?:\.\d+)+(?:\s+(?:R|Rev\.\s*)\d+)?",
+    ),
+    WsbField(
+        "heat_pump",
+        "outdoor_unit_variant",
+        "Außengerät Variante",
+        state_class=None,
+        aliases=("Aussengerät Variante",),
+        text_pattern=r"WSB \d{1,2}(?:[- ][A-Za-z0-9]+)*",
+    ),
 )
-WSB_FIELDS = _PUMP_SETTINGS + _HEATER_COUNTERS + _HEAT_PUMP_INFO
+_HEATING_CIRCUIT_INFO = (
+    _temperature("heating_circuit", "outdoor_temperature_average", "AT Mittelwert"),
+    _temperature("heating_circuit", "outdoor_temperature_long_term", "AT Langzeitwert"),
+    _temperature("heating_circuit", "reported_supply_temperature", "Vorlauftemperatur"),
+)
+WSB_FIELDS = _PUMP_SETTINGS + _HEATER_COUNTERS + _HEAT_PUMP_INFO + _HEATING_CIRCUIT_INFO
 
 
 def _menu(page: BeautifulSoup, label: str) -> str:
@@ -154,41 +249,69 @@ def _pump_values(page: BeautifulSoup) -> dict[str, int | str]:
     return values
 
 
-def _browse_value(page: BeautifulSoup, label: str) -> str | None:
-    matches = []
+def _info_values(
+    page: BeautifulSoup, fields: tuple[WsbField, ...]
+) -> dict[str, int | float | str]:
+    rows: dict[str, list[str]] = {}
     for row in page.select("div.nav-link.browseobj"):
-        heading = row.find("h5")
-        if heading and heading.get_text(" ", strip=True) == label:
-            matches.append(row.get_text(" ", strip=True).removeprefix(label).strip())
-    return matches[0] if len(matches) == 1 else None
+        if heading := row.find("h5"):
+            label = heading.get_text(" ", strip=True)
+            raw = row.get_text(" ", strip=True).removeprefix(label).strip()
+            rows.setdefault(label, []).append(raw)
 
-
-def _hour_values(page: BeautifulSoup) -> dict[str, int]:
-    values = {}
-    for field in _HEATER_COUNTERS:
-        raw = _browse_value(page, field.label)
-        if raw is not None and (match := re.fullmatch(r"(\d+)\s*h", raw)):
-            values[field.key] = int(match[1])
+    values: dict[str, int | float | str] = {}
+    for field in fields:
+        matches = [
+            value
+            for label in (field.label, *field.aliases)
+            for value in rows.get(label, ())
+        ]
+        if len(matches) == 1 and (value := _parse_info_value(field, matches[0])) is not None:
+            values[field.key] = value
     return values
 
 
-def _heat_pump_values(page: BeautifulSoup) -> dict[str, int | float]:
-    values: dict[str, int | float] = {}
-    for field in _HEAT_PUMP_INFO:
-        raw = _browse_value(page, field.label)
-        if raw is None:
-            continue
-        if field.device_class == SensorDeviceClass.VOLUME_FLOW_RATE:
-            if match := _FLOW_VALUE.fullmatch(raw):
-                flow = float(match[1].replace(",", "."))
-                if math.isfinite(flow):
-                    values[field.key] = flow
-        elif field.unit == PERCENTAGE:
-            if (match := re.fullmatch(r"(\d{1,3})\s*%", raw)) and int(match[1]) <= 100:
-                values[field.key] = int(match[1])
-        elif re.fullmatch(r"\d+", raw):
-            values[field.key] = int(raw)
-    return values
+def _parse_info_value(field: WsbField, raw: str) -> int | float | str | None:
+    if field.choices:
+        return dict(field.choices).get(raw)
+    if field.text_pattern is not None:
+        return raw if re.fullmatch(field.text_pattern, raw) else None
+    if field.unit == PERCENTAGE:
+        if (match := re.fullmatch(r"(\d{1,3})\s*%", raw)) and int(match[1]) <= 100:
+            return int(match[1])
+        return None
+    if field.unit == UnitOfTime.HOURS:
+        match = re.fullmatch(r"([0-9]{1,12})\s*h", raw)
+        return int(match[1]) if match else None
+    if field.unit is None:
+        return int(raw) if _UNSIGNED_VALUE.fullmatch(raw) else None
+
+    if field.unit == UnitOfFrequency.HERTZ and raw == "Aus":
+        return 0
+    pattern = {
+        UnitOfTemperature.CELSIUS: _TEMPERATURE_VALUE,
+        UnitOfFrequency.HERTZ: _FREQUENCY_VALUE,
+        UnitOfVolumeFlowRate.CUBIC_METERS_PER_HOUR: _FLOW_VALUE,
+    }[field.unit]
+    if match := pattern.fullmatch(raw):
+        value = float(match[1].replace(",", ".").replace("−", "-"))
+        if math.isfinite(value) and (
+            field.unit != UnitOfTemperature.CELSIUS or -50 <= value <= 200
+        ):
+            return value
+    return None
+
+
+def _hour_values(page: BeautifulSoup) -> dict[str, int | float | str]:
+    return _info_values(page, _HEATER_COUNTERS)
+
+
+def _heat_pump_values(page: BeautifulSoup) -> dict[str, int | float | str]:
+    return _info_values(page, _HEAT_PUMP_INFO)
+
+
+def _heating_circuit_values(page: BeautifulSoup) -> dict[str, int | float | str]:
+    return _info_values(page, _HEATING_CIRCUIT_INFO)
 
 
 class WsbWebifCoordinator(DataUpdateCoordinator[dict[str, int | float | str]]):
@@ -199,24 +322,46 @@ class WsbWebifCoordinator(DataUpdateCoordinator[dict[str, int | float | str]]):
         hass: HomeAssistant,
         api: WebifConnection | None,
         mcu_lock: asyncio.Lock,
+        *,
+        config_entry: MyConfigEntry | None = None,
     ) -> None:
         """Set up WEM polling."""
         super().__init__(
             hass,
             _LOGGER,
             name="Weishaupt WSB WEM",
+            config_entry=config_entry,
             update_interval=timedelta(minutes=5),
         )
         self.api = api
         self.mcu_lock = mcu_lock
         self.controller_firmware: str | None = None
 
+    def _update_controller_firmware(self, firmware: str) -> None:
+        if firmware == self.controller_firmware:
+            return
+        self.controller_firmware = firmware
+        if self.config_entry is not None:
+            registry = dr.async_get(self.hass)
+            for device in dr.async_entries_for_config_entry(
+                registry, self.config_entry.entry_id
+            ):
+                registry.async_update_device(device.id, sw_version=firmware)
+
+    async def async_close(self) -> None:
+        """Stop WEM requests before closing the shared HTTP session."""
+        api, self.api = self.api, None
+        await self.async_shutdown()
+        if api is not None:
+            async with self.mcu_lock:
+                await api.close()
+
     async def _get_page(self, path: str) -> BeautifulSoup:
-        if self.api is None:
-            raise ValueError("WEM is disabled")
         # The pinned client handles pacing and reauthentication. The profile
         # follows only same-device export menu links and never submits settings.
         async with self.mcu_lock, asyncio.timeout(_REQUEST_TIMEOUT):
+            if self.api is None:
+                raise ValueError("WEM is disabled")
             response = await self.api._request("GET", path)  # noqa: SLF001
         if response.status_code != 200:
             raise ValueError("WEM export unavailable")
@@ -228,18 +373,24 @@ class WsbWebifCoordinator(DataUpdateCoordinator[dict[str, int | float | str]]):
         values: dict[str, int | float | str] = {}
         try:
             root = await self._get_page(_ROOT)
-        except (TimeoutError, ValueError, WeishauptWebifError) as err:
-            _LOGGER.debug("WSB WEM root unavailable (%s)", type(err).__name__)
-            return values
+        except _WEM_ERRORS as err:
+            raise UpdateFailed(f"WEM export unavailable ({type(err).__name__})") from None
         if match := _CONTROLLER_FIRMWARE.search(root.get_text(" ", strip=True)):
-            self.controller_firmware = f"WWP-CPU COM V{match[1]} R{match[2]}"
+            self._update_controller_firmware(f"WWP-CPU COM V{match[1]} R{match[2]}")
         for first, pages in (
             ("Wärmepumpe", (("Pumpe", _pump_values),)),
-            ("Info", (("2. WEZ", _hour_values), ("Wärmepumpe", _heat_pump_values))),
+            (
+                "Info",
+                (
+                    ("2. WEZ", _hour_values),
+                    ("Wärmepumpe", _heat_pump_values),
+                    ("Heizkreis", _heating_circuit_values),
+                ),
+            ),
         ):
             try:
                 section = await self._get_page(_menu(root, first))
-            except (TimeoutError, ValueError, WeishauptWebifError) as err:
+            except _WEM_ERRORS as err:
                 _LOGGER.debug(
                     "WSB WEM menu %s unavailable (%s)", first, type(err).__name__
                 )
@@ -248,13 +399,15 @@ class WsbWebifCoordinator(DataUpdateCoordinator[dict[str, int | float | str]]):
                 try:
                     page = await self._get_page(_menu(section, second))
                     values.update(parse(page))
-                except (TimeoutError, ValueError, WeishauptWebifError) as err:
+                except _WEM_ERRORS as err:
                     _LOGGER.debug(
                         "WSB WEM menu %s/%s unavailable (%s)",
                         first,
                         second,
                         type(err).__name__,
                     )
+        if not values:
+            raise UpdateFailed("No supported WSB fields in WEM export")
         return values
 
 
@@ -282,6 +435,8 @@ class WsbWebifSensor(CoordinatorEntity[WsbWebifCoordinator], SensorEntity):
         else:
             self._attr_device_class = field.device_class
             self._attr_state_class = field.state_class
+        if field.text_pattern is not None:
+            self._attr_entity_category = EntityCategory.DIAGNOSTIC
         if field.unit == UnitOfTime.HOURS:
             self._attr_device_class = SensorDeviceClass.DURATION
             # The stable sensor recorded hourly statistics as measurements.
@@ -301,4 +456,4 @@ class WsbWebifSensor(CoordinatorEntity[WsbWebifCoordinator], SensorEntity):
     @property
     def native_value(self) -> int | float | str | None:
         """Return the value from the current poll."""
-        return (self.coordinator.data or {}).get(self.field.key)
+        return (self.coordinator.data or {}).get(self.field.key) if self.available else None

@@ -5,10 +5,10 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from custom_components.weishaupt_modbus.const import CONF, CONST
 from custom_components.weishaupt_modbus.modbus.descriptions.calculated import (
     calculate_thermal_power,
 )
-from custom_components.weishaupt_modbus.const import CONF, CONST
 from custom_components.weishaupt_modbus.modbus.descriptions.description import (
     NumberDescription,
     SelectDescription,
@@ -16,6 +16,7 @@ from custom_components.weishaupt_modbus.modbus.descriptions.description import (
 )
 from custom_components.weishaupt_modbus.modbus.descriptions.params import (
     EMPTY,
+    ENUM,
     NUMBER_EMPTY,
 )
 from custom_components.weishaupt_modbus.modbus.descriptions.second_heat_source import (
@@ -85,8 +86,8 @@ def test_entity_device_info():
         (CONST.DOMAIN, "AA:BB:CC:DD:EE:FF_second_heat_source")
     }
     assert device_info["translation_key"] == "dev_second_heat_source"
-    assert device_info["sw_version"] == "Device_SW_Version"
-    assert device_info["model"] == "Device_model"
+    assert "sw_version" not in device_info
+    assert "model" not in device_info
     assert device_info["manufacturer"] == "Weishaupt"
 
 
@@ -111,22 +112,10 @@ def create_sensor_entity(
     description = SensorDescription(
         key="test_value",
         report_name="heat_pump",
-        params=EMPTY if not is_enum else EMPTY,
+        params=ENUM if is_enum else EMPTY,
         value_fn=value_fn,
         calculated_value_fn=calculated_value_fn,
     )
-
-    # The entity uses params.is_enum to decide whether to format the value.
-    if is_enum:
-        from custom_components.weishaupt_modbus.modbus.descriptions.params import ENUM
-
-        description = SensorDescription(
-            key="test_value",
-            report_name="heat_pump",
-            params=ENUM,
-            value_fn=value_fn,
-            calculated_value_fn=calculated_value_fn,
-        )
 
     return WeishauptSensor(coordinator, description, config_entry)
 
@@ -174,6 +163,7 @@ def test_sensor_native_value_calculated():
 def create_calculated_sensor():
     """Create a sensor using the real thermal power calculation."""
     coordinator = MagicMock()
+    coordinator.data.updated = {"system", "heat_pump"}
     coordinator.device = MagicMock()
 
     config_entry = MagicMock()
@@ -191,13 +181,19 @@ def create_calculated_sensor():
         calculated_value_fn=calculate_thermal_power,
     )
 
-    entity = WeishauptSensor(
+    return WeishauptSensor(
         coordinator,
         description,
         config_entry,
     )
 
-    return entity
+
+def test_sensor_calculated_value_rejects_stale_system_inputs():
+    """A fresh heat-pump report cannot validate the air intake from a failed report."""
+    entity = create_calculated_sensor()
+    entity.coordinator.data.updated = {"heat_pump"}
+    assert entity.native_value is None
+    entity.coordinator.config_entry.runtime_data.powermap.map.assert_not_called()
 
 
 def test_sensor_calculated_value_missing_power_request():
@@ -274,7 +270,7 @@ def create_number_entity():
     """Create a number with mocked callbacks."""
     coordinator = MagicMock()
     coordinator.device = MagicMock()
-    coordinator.async_request_refresh = AsyncMock()
+    coordinator.async_write_setting = AsyncMock()
 
     config_entry = MagicMock()
     config_entry.data = {
@@ -310,11 +306,9 @@ async def test_number_set_native_value():
 
     await entity.async_set_native_value(23.5)
 
-    entity.description.set_value_fn.assert_awaited_once_with(
-        entity.coordinator.device,
-        23.5,
+    entity.coordinator.async_write_setting.assert_awaited_once_with(
+        entity.description.set_value_fn, 23.5
     )
-    entity.coordinator.async_request_refresh.assert_awaited_once()
 
 
 class SelectTestEnum(Enum):
@@ -329,7 +323,7 @@ def create_select_entity(value):
     """Create a select with a controlled value."""
     coordinator = MagicMock()
     coordinator.device = MagicMock()
-    coordinator.async_request_refresh = AsyncMock()
+    coordinator.async_write_setting = AsyncMock()
 
     config_entry = MagicMock()
     config_entry.data = {
@@ -380,8 +374,6 @@ async def test_select_option():
 
     await entity.async_select_option("AUTO")
 
-    entity.description.set_value_fn.assert_awaited_once_with(
-        entity.coordinator.device,
-        SelectTestEnum.AUTO.value,
+    entity.coordinator.async_write_setting.assert_awaited_once_with(
+        entity.description.set_value_fn, SelectTestEnum.AUTO.value
     )
-    entity.coordinator.async_request_refresh.assert_awaited_once()

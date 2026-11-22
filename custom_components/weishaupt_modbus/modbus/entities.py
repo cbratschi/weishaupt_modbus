@@ -98,6 +98,8 @@ class WeishauptSensor(WeishauptEntity, SensorEntity):
         """Initialize the sensor."""
         super().__init__(coordinator, description, config_entry)
 
+        if description.translation_key is not None:
+            self._attr_translation_key = description.translation_key
         self._attr_device_class = description.params.device_class
         if description.params.options:
             self._attr_options = list(description.params.options)

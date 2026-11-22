@@ -64,7 +64,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: MyConfigEntry) -> bool:
             await webif_coordinator.async_config_entry_first_refresh()
 
     if wsb_read_only and webif_api is not None:
-        wsb_coordinator = WsbWebifCoordinator(hass, webif_api, mcu_lock)
+        wsb_coordinator = WsbWebifCoordinator(
+            hass, webif_api, mcu_lock, config_entry=entry
+        )
     readings = [
         "system",
         "heat_pump",
@@ -111,9 +113,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: MyConfigEntry) -> bool:
         mcu_lock=mcu_lock,
     )
     await weishaupt_coordinator.async_config_entry_first_refresh()
-    if wsb_coordinator is not None:
-        await wsb_coordinator.async_refresh()
-
     entry.runtime_data = MyData(
         config_dir=hass.config.config_dir,
         hass=hass,
@@ -140,12 +139,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: MyConfigEntry) -> bool:
             },
         )
 
-    if wsb_coordinator is not None:
+    if wsb_read_only:
         registry = dr.async_get(hass)
         for device_entry in dr.async_entries_for_config_entry(registry, entry.entry_id):
             updates = {}
             if device_entry.sw_version == "Device_SW_Version":
-                updates["sw_version"] = wsb_coordinator.controller_firmware
+                updates["sw_version"] = None
             if device_entry.model == "Device_model":
                 updates["model"] = None
             if updates:
@@ -162,6 +161,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: MyConfigEntry) -> bool:
     # It's done by calling the `async_setup_entry` function in each platform module.
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
+    if wsb_coordinator is not None:
+        entry.async_create_background_task(
+            hass, wsb_coordinator.async_refresh(), "weishaupt_wsb_initial_webif_refresh"
+        )
     _LOGGER.info("Init done")
     for state in hass.states.async_all("sensor"):
         sensor_unit = state.attributes.get("unit_of_measurement")
@@ -244,6 +247,9 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: MyConfigEntry) 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload entry."""
     unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
-    if unloaded and entry.runtime_data.webif_api is not None:
-        await entry.runtime_data.webif_api.close()
+    if unloaded:
+        if (wsb := entry.runtime_data.wsb_coordinator) is not None:
+            await wsb.async_close()
+        elif entry.runtime_data.webif_api is not None:
+            await entry.runtime_data.webif_api.close()
     return unloaded

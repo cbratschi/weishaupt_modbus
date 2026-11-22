@@ -4,6 +4,7 @@ import asyncio
 import json
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 from bs4 import BeautifulSoup
 from modbus_connection.exceptions import ModbusExceptionError
@@ -21,10 +22,12 @@ from custom_components.weishaupt_modbus.modbus.weishaupt_modbus_client.model.dev
 )
 from custom_components.weishaupt_modbus.webif.wsb import (
     WSB_FIELDS,
+    WsbWebifCoordinator,
     _heat_pump_values,
     _hour_values,
     _pump_values,
 )
+from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ServiceValidationError
 
 
@@ -425,6 +428,70 @@ def test_wsb_heat_pump_info_keeps_zero_and_rejects_bad_rows() -> None:
     assert _heat_pump_values(page) == {}
 
 
+def test_wsb_wem_parses_advanced_values_and_rejects_ambiguous_fields() -> None:
+    """Keep real readings, including zero and signed temperatures."""
+    values = {
+        "Stellung Umschaltventil": "Heizkreis",
+        "Soll Frequenz Verdichter": "Aus",
+        "Ist Frequenz Verdichter": "20,5 Hz",
+        "Betriebsstd. Verdichter": "7785 h",
+        "Solltemperatur": "37,0 °C",
+        "Wärmetauscher AG Eintrit": "−4,5 °C",
+        "Wärmetauscher AG Mitte": "--",
+        "Druckgas": "53 °C",
+        "Druckgastemperatur": "54 °C",
+        "Wärmetauscher Innen": "37,5 °C",
+        "Kältemittel Innen": "-3276.8 °C",
+        "Version WWP-SG": "V5.0",
+        "Version WWP-CPU": "Device_SW_Version",
+        "Außengerät Variante": "WSB 8-B",
+    }
+    page = BeautifulSoup(
+        "".join(
+            f'<div class="nav-link browseobj"><h5>{label}</h5>{value}</div>'
+            for label, value in values.items()
+        ),
+        "html.parser",
+    )
+    assert _heat_pump_values(page) == {
+        "diverter_valve_position": "heating_circuit",
+        "compressor_frequency_target": 0,
+        "compressor_frequency_actual": 20.5,
+        "compressor_operating_hours": 7785,
+        "reported_target_temperature": 37,
+        "outdoor_heat_exchanger_inlet_temperature": -4.5,
+        "indoor_heat_exchanger_temperature": 37.5,
+        "system_unit_version": "V5.0",
+        "outdoor_unit_variant": "WSB 8-B",
+    }
+
+
+@pytest.mark.asyncio
+async def test_wsb_unload_waits_for_active_wem_request_without_starting_another(tmp_path):
+    """Close the session only after an active request has left the MCU lock."""
+    entered, release = asyncio.Event(), asyncio.Event()
+    links = '<a href="/settings_export.html?stack=01">Info</a>'
+
+    async def request(_method, _path):
+        entered.set()
+        await release.wait()
+        return SimpleNamespace(status_code=200, text=links)
+
+    api = SimpleNamespace(_request=AsyncMock(side_effect=request), close=AsyncMock())
+    coordinator = WsbWebifCoordinator(
+        HomeAssistant(str(tmp_path)), api, asyncio.Lock()
+    )
+    refresh = asyncio.create_task(coordinator.async_refresh())
+    await asyncio.wait_for(entered.wait(), timeout=1)
+    closing = asyncio.create_task(coordinator.async_close())
+    await asyncio.sleep(0)
+    api.close.assert_not_awaited()
+    release.set()
+    await asyncio.wait_for(asyncio.gather(refresh, closing), timeout=1)
+    api._request.assert_awaited_once_with("GET", "/settings_export.html")
+    api.close.assert_awaited_once()
+
+
 def test_wsb_sensors_have_names_and_options_in_all_locales() -> None:
     """Verify that all exposed entities and new enum states have display strings."""
     directory = (
@@ -434,7 +501,7 @@ def test_wsb_sensors_have_names_and_options_in_all_locales() -> None:
         / "translations"
     )
     options = {
-        f"{item.report_name}_{item.key}": item.params.options
+        (item.translation_key or f"{item.report_name}_{item.key}"): item.params.options
         for item in _profile()
         if isinstance(item, SensorDescription)
     }
