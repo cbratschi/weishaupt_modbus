@@ -77,6 +77,47 @@ class WemPages:
         )
 
 
+def populate_all_wem_reports(api: WemPages) -> None:
+    """Populate the 26 live WSB fields with synthetic readings."""
+    api.pages[PUMP] = "".join(
+        f"<a>{label} {value}</a>"
+        for label, value in (
+            ("Regelungsart Heizen", "Konstantbetrieb"),
+            ("Regelungsart WW", "Konstantbetrieb"),
+            ("Regelungsart Kühlen", "Konstantbetrieb"),
+            ("Funktion", "Zubringerpumpe"),
+            ("Freigabe bei EVU-Sperre", "Aus"),
+        )
+    )
+    api.pages[HEATING_CIRCUIT] = (
+        info("AT Mittelwert", "7 °C")
+        + info("AT Langzeitwert", "6 °C")
+        + info("Vorlauftemperatur", "33 °C")
+    )
+    api.pages[HEAT_PUMP] = "".join(
+        info(label, value)
+        for label, value in (
+            ("Volumenstrom", "1.0 m³/h"),
+            ("Drehzahl Pumpe M1", "55 %"),
+            ("Schaltspiele Verdichter", "50"),
+            ("Schaltspiele Abtauen", "2"),
+            ("Stellung Umschaltventil", "Heizkreis"),
+            ("Soll Frequenz Verdichter", "22 Hz"),
+            ("Ist Frequenz Verdichter", "20 Hz"),
+            ("Betriebsstd. Verdichter", "210 h"),
+            ("Solltemperatur", "35 °C"),
+            ("Wärmetauscher AG Eintritt", "6 °C"),
+            ("Wärmetauscher AG Mitte", "6 °C"),
+            ("Druckgas", "60 °C"),
+            ("Wärmetauscher Innen", "31 °C"),
+            ("Kältemittel Innen", "28 °C"),
+            ("Version WWP-SG", "V5.2 R14"),
+            ("Version WWP-CPU", "V5.2 R14"),
+            ("Aussengerät Variante", "WSB 8-B"),
+        )
+    )
+
+
 async def setup_wem(tmp_path: Path) -> tuple[WemPages, WsbWebifCoordinator]:
     """Populate routes from a successful cold poll."""
     lock = asyncio.Lock()
@@ -139,7 +180,7 @@ async def test_one_partial_leaf_uses_one_saved_slot_for_fresh_data(tmp_path: Pat
 
 
 @pytest.mark.asyncio
-async def test_empty_pages_respect_budget_and_rediscover_next_cycle(tmp_path: Path) -> None:
+async def test_persistently_empty_pages_respect_budget_and_rediscover(tmp_path: Path) -> None:
     """Expose a prolonged outage and accept relocated leaf URLs on recovery."""
     api, coordinator = await setup_wem(tmp_path)
     healthy = dict(api.pages)
@@ -151,6 +192,13 @@ async def test_empty_pages_respect_budget_and_rediscover_next_cycle(tmp_path: Pa
     assert len(api.requests) == 7
     assert max(Counter(api.requests).values()) == 2
     assert not coordinator.last_update_success
+
+    api.requests.clear()
+    await coordinator.async_refresh()
+    assert len(api.requests) == 7
+    assert ROOT not in api.requests
+    assert not coordinator.last_update_success
+
     api.requests.clear()
     api.pages = healthy
     updated_path = f"{INFO_MENU},07"
@@ -260,43 +308,7 @@ async def test_modbus_can_acquire_lock_between_wem_requests(tmp_path: Path) -> N
 async def test_three_incomplete_reports_recover_within_one_poll(tmp_path: Path) -> None:
     """Replay one missed response each for the three report groups lost at 18:31."""
     api, coordinator = await setup_wem(tmp_path)
-    api.pages[PUMP] = "".join(
-        f"<a>{label} {value}</a>"
-        for label, value in (
-            ("Regelungsart Heizen", "Konstantbetrieb"),
-            ("Regelungsart WW", "Konstantbetrieb"),
-            ("Regelungsart Kühlen", "Konstantbetrieb"),
-            ("Funktion", "Zubringerpumpe"),
-            ("Freigabe bei EVU-Sperre", "Aus"),
-        )
-    )
-    api.pages[HEATING_CIRCUIT] = (
-        info("AT Mittelwert", "7 °C")
-        + info("AT Langzeitwert", "6 °C")
-        + info("Vorlauftemperatur", "33 °C")
-    )
-    api.pages[HEAT_PUMP] = "".join(
-        info(label, value)
-        for label, value in (
-            ("Volumenstrom", "1.0 m³/h"),
-            ("Drehzahl Pumpe M1", "55 %"),
-            ("Schaltspiele Verdichter", "50"),
-            ("Schaltspiele Abtauen", "2"),
-            ("Stellung Umschaltventil", "Heizkreis"),
-            ("Soll Frequenz Verdichter", "22 Hz"),
-            ("Ist Frequenz Verdichter", "20 Hz"),
-            ("Betriebsstd. Verdichter", "210 h"),
-            ("Solltemperatur", "35 °C"),
-            ("Wärmetauscher AG Eintritt", "6 °C"),
-            ("Wärmetauscher AG Mitte", "6 °C"),
-            ("Druckgas", "60 °C"),
-            ("Wärmetauscher Innen", "31 °C"),
-            ("Kältemittel Innen", "28 °C"),
-            ("Version WWP-SG", "V5.2 R14"),
-            ("Version WWP-CPU", "V5.2 R14"),
-            ("Aussengerät Variante", "WSB 8-B"),
-        )
-    )
+    populate_all_wem_reports(api)
     await coordinator.async_refresh()
     assert len(coordinator.data) == 26
     api.requests.clear()
@@ -339,3 +351,38 @@ async def test_transport_timeout_does_not_enter_cooldown_under_shared_lock(
     assert api.requests == [PUMP, HEATER]
     assert coordinator.data == {"pump_regulation_heating": "constant_speed"}
     assert not api.lock.locked()
+
+
+@pytest.mark.asyncio
+async def test_one_empty_poll_keeps_routes_and_retry_capacity(tmp_path: Path) -> None:
+    """Recover all 26 readings if the same reports need retries next time."""
+    api, coordinator = await setup_wem(tmp_path)
+    populate_all_wem_reports(api)
+    await coordinator.async_refresh()
+    assert len(coordinator.data) == 26
+    healthy = dict(api.pages)
+    affected = (PUMP, HEAT_PUMP, HEATING_CIRCUIT)
+
+    for path in affected:
+        api.pages[path] = api.main_menu
+    api.requests.clear()
+    await coordinator.async_refresh()
+
+    assert coordinator.data == {"electric_heater_1_operating_hours": 37}
+    assert len(api.requests) == 7
+
+    api.pages = healthy
+    for path in affected:
+        api.next_response[path] = api.main_menu
+    api.pages[HEAT_PUMP] = api.pages[HEAT_PUMP].replace("1.0 m³/h", "1.3 m³/h")
+    api.requests.clear()
+    await coordinator.async_refresh()
+
+    assert len(coordinator.data) == 26
+    assert coordinator.data["actual_flow_rate"] == 1.3
+    assert Counter(api.requests) == {
+        PUMP: 2,
+        HEATER: 1,
+        HEAT_PUMP: 2,
+        HEATING_CIRCUIT: 2,
+    }

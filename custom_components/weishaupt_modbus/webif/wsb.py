@@ -2,7 +2,7 @@
 
 import asyncio
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import timedelta
 import logging
 import math
@@ -351,6 +351,7 @@ class _ReportRoute:
 
     path: str
     fields: frozenset[str]
+    empty_polls: int = 0
 
 
 class WsbWebifCoordinator(DataUpdateCoordinator[dict[str, int | float | str]]):
@@ -537,8 +538,6 @@ class WsbWebifCoordinator(DataUpdateCoordinator[dict[str, int | float | str]]):
                         second,
                         len(cached.fields - current.keys()),
                     )
-                    if not current:
-                        self._routes.pop(key, None)
                     retry.append((key, cached, parse))
 
         # Discovery takes priority. Retry each incomplete cached report once.
@@ -557,6 +556,15 @@ class WsbWebifCoordinator(DataUpdateCoordinator[dict[str, int | float | str]]):
                 self._routes[key] = _ReportRoute(
                     cached.path, cached.fields | frozenset(current)
                 )
+
+        # A successful read replaces its route. Keep an empty route through
+        # one poll so discovery cannot take the next poll's retry slots.
+        for key, cached, _ in retry:
+            if self._routes.get(key) is cached:
+                if cached.empty_polls:
+                    self._routes.pop(key)
+                else:
+                    self._routes[key] = replace(cached, empty_polls=1)
 
 
 class WsbWebifSensor(CoordinatorEntity[WsbWebifCoordinator], SensorEntity):
