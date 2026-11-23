@@ -1,7 +1,7 @@
 """Read optional WSB values that do not have a verified Modbus mapping."""
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import timedelta
 import logging
@@ -10,7 +10,11 @@ import re
 
 from bs4 import BeautifulSoup
 from weishaupt_webif_api import WebifConnection
-from weishaupt_webif_api.exceptions import WeishauptWebifError
+from weishaupt_webif_api.exceptions import (
+    McuResourceError,
+    SessionExpiredError,
+    WeishauptWebifError,
+)
 
 from custom_components.weishaupt_modbus.configentry import (
     MyConfigEntry,
@@ -50,7 +54,7 @@ _FLOW_VALUE = re.compile(r"(\d+(?:[.,]\d+)?)\s*m\s*[3³]\s*/\s*h")
 _TEMPERATURE_VALUE = re.compile(r"([+−-]?\d+(?:[.,]\d+)?)\s*°\s*C")
 _FREQUENCY_VALUE = re.compile(r"(\d+(?:[.,]\d+)?)\s*Hz")
 _UNSIGNED_VALUE = re.compile(r"[0-9]{1,12}")
-_WEM_ERRORS = (OSError, ValueError, WeishauptWebifError)
+_REPORT_FAILURES = (OSError, ValueError, WeishauptWebifError)
 
 
 @dataclass(frozen=True)
@@ -328,6 +332,17 @@ _REPORT_PAGES = (
         ),
     ),
 )
+_REPORT_KEYS = frozenset(
+    (parent, child) for parent, pages in _REPORT_PAGES for child, _ in pages
+)
+
+
+class _ExportBudgetExhausted(ValueError):
+    """No export requests remain in this poll."""
+
+
+class _WemAuthenticationRequired(WeishauptWebifError):
+    """The export endpoint did not return an authenticated page."""
 
 
 @dataclass(frozen=True)
@@ -361,6 +376,7 @@ class WsbWebifCoordinator(DataUpdateCoordinator[dict[str, int | float | str]]):
         self.mcu_lock = mcu_lock
         self.controller_firmware: str | None = None
         self._routes: dict[tuple[str, str], _ReportRoute] = {}
+        self._last_partial_poll: str | None = None
 
     def _update_controller_firmware(self, firmware: str) -> None:
         if firmware == self.controller_firmware:
@@ -390,13 +406,17 @@ class WsbWebifCoordinator(DataUpdateCoordinator[dict[str, int | float | str]]):
             if self.api is None:
                 raise ValueError("WEM is disabled")
             response = await self.api._request("GET", path)  # noqa: SLF001
+        if response.status_code in (401, 403):
+            raise _WemAuthenticationRequired("WEM authentication required")
+        if response.status_code in (429, 503):
+            raise McuResourceError("WEM export endpoint is busy")
         if response.status_code != 200:
             raise ValueError("WEM export unavailable")
         page = BeautifulSoup(response.text, "html.parser")
         if page.select_one('input[name="pass"]') or (
             page.title and page.title.get_text(strip=True).casefold() == "login"
         ):
-            raise ValueError("WEM export returned a login page")
+            raise _WemAuthenticationRequired("WEM export returned a login page")
         return page
 
     async def _async_update_data(self) -> dict[str, int | float | str]:
@@ -404,21 +424,66 @@ class WsbWebifCoordinator(DataUpdateCoordinator[dict[str, int | float | str]]):
             return {}
 
         requests = 0
+        firmware: str | None = None
+        expected = {key: route.fields for key, route in self._routes.items()}
 
         async def get_page(path: str) -> BeautifulSoup:
-            nonlocal requests
+            nonlocal requests, firmware
             if requests >= _MAX_EXPORT_REQUESTS:
-                raise ValueError("WEM export request budget exhausted")
+                raise _ExportBudgetExhausted
             requests += 1
-            return await self._get_page(path)
+            page = await self._get_page(path)
+            if match := _CONTROLLER_FIRMWARE.search(page.get_text(" ", strip=True)):
+                firmware = f"WWP-CPU COM V{match[1]} R{match[2]}"
+                if path == _ROOT:
+                    self._update_controller_firmware(firmware)
+            return page
 
         values: dict[str, int | float | str] = {}
+        interruption = None
         try:
-            root = await get_page(_ROOT)
-        except _WEM_ERRORS as err:
-            raise UpdateFailed(f"WEM export unavailable ({type(err).__name__})") from None
-        if match := _CONTROLLER_FIRMWARE.search(root.get_text(" ", strip=True)):
-            self._update_controller_firmware(f"WWP-CPU COM V{match[1]} R{match[2]}")
+            # A warm poll can spend all spare calls on incomplete leaves.
+            # Verified exports also carry the firmware header.
+            root = (
+                None if self._routes.keys() >= _REPORT_KEYS else await get_page(_ROOT)
+            )
+            await self._read_reports(get_page, root, values)
+        except _REPORT_FAILURES as err:
+            # Further requests after a transport failure can wait through the
+            # client's cooldown while holding the controller lock.
+            if isinstance(err, (_WemAuthenticationRequired, SessionExpiredError)):
+                self._routes.clear()
+            interruption = type(err).__name__
+            if not values:
+                raise UpdateFailed(f"WEM export unavailable ({interruption})") from None
+
+        if firmware is not None:
+            self._update_controller_firmware(firmware)
+        if not values:
+            raise UpdateFailed("No supported WSB fields in WEM export")
+
+        incomplete = [
+            f"{parent}/{child} ({len(fields - values.keys())} missing)"
+            for (parent, child), fields in sorted(expected.items())
+            if fields - values.keys()
+        ]
+        if interruption:
+            incomplete.append(interruption)
+        detail = ", ".join(incomplete) or None
+        if detail is not None and detail != self._last_partial_poll:
+            _LOGGER.warning(
+                "Incomplete WSB WEM poll after %d export calls. %s", requests, detail
+            )
+        self._last_partial_poll = detail
+        return values
+
+    async def _read_reports(
+        self,
+        get_page: Callable[[str], Awaitable[BeautifulSoup]],
+        root: BeautifulSoup | None,
+        values: dict[str, int | float | str],
+    ) -> None:
+        """Read known pages and retry incomplete reports within the poll budget."""
         retry: list[
             tuple[
                 tuple[str, str],
@@ -428,11 +493,13 @@ class WsbWebifCoordinator(DataUpdateCoordinator[dict[str, int | float | str]]):
         ] = []
         for first, pages in _REPORT_PAGES:
             section = None
-            if any((first, second) not in self._routes for second, _ in pages):
+            if root is not None and any(
+                (first, second) not in self._routes for second, _ in pages
+            ):
                 try:
                     parent = _menu(root, first)
                     section = await get_page(parent), parent
-                except _WEM_ERRORS as err:
+                except ValueError as err:
                     _LOGGER.debug(
                         "WSB WEM menu %s unavailable (%s)", first, type(err).__name__
                     )
@@ -448,9 +515,8 @@ class WsbWebifCoordinator(DataUpdateCoordinator[dict[str, int | float | str]]):
                     else:
                         continue
                     current = parse(await get_page(path))
-                except _WEM_ERRORS as err:
-                    if isinstance(err, ValueError):
-                        self._routes.pop(key, None)
+                except ValueError as err:
+                    self._routes.pop(key, None)
                     _LOGGER.debug(
                         "WSB WEM menu %s/%s unavailable (%s)",
                         first,
@@ -475,15 +541,13 @@ class WsbWebifCoordinator(DataUpdateCoordinator[dict[str, int | float | str]]):
                         self._routes.pop(key, None)
                     retry.append((key, cached, parse))
 
-        # Warm polls normally follow four proven leaf URLs after the root.
-        # Rediscovery uses the saved budget first. Only incomplete HTML can
-        # use an unused slot, with at most one retry per previously read leaf.
+        # Discovery takes priority. Retry each incomplete cached report once.
         for key, cached, parse in retry:
-            if requests >= _MAX_EXPORT_REQUESTS:
-                break
             try:
                 current = parse(await get_page(cached.path))
-            except _WEM_ERRORS as err:
+            except _ExportBudgetExhausted:
+                break
+            except ValueError as err:
                 _LOGGER.debug(
                     "WSB WEM page retry %s/%s failed (%s)", *key, type(err).__name__
                 )
@@ -493,9 +557,6 @@ class WsbWebifCoordinator(DataUpdateCoordinator[dict[str, int | float | str]]):
                 self._routes[key] = _ReportRoute(
                     cached.path, cached.fields | frozenset(current)
                 )
-        if not values:
-            raise UpdateFailed("No supported WSB fields in WEM export")
-        return values
 
 
 class WsbWebifSensor(CoordinatorEntity[WsbWebifCoordinator], SensorEntity):

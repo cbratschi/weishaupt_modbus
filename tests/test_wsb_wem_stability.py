@@ -6,6 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from weishaupt_webif_api.exceptions import ConnectionTimeoutError
 
 from custom_components.weishaupt_modbus.webif.wsb import WsbWebifCoordinator
 from homeassistant.core import HomeAssistant
@@ -101,7 +102,7 @@ async def test_cached_routes_bypass_incomplete_navigation(tmp_path: Path) -> Non
 
     await coordinator.async_refresh()
 
-    assert api.requests == [ROOT, PUMP, HEATER, HEAT_PUMP, HEATING_CIRCUIT]
+    assert api.requests == [PUMP, HEATER, HEAT_PUMP, HEATING_CIRCUIT]
     assert coordinator.data["compressor_frequency_actual"] == 22
     assert coordinator.data["actual_flow_rate"] == 1.2
     assert coordinator.data["outdoor_temperature_average"] == 7
@@ -131,7 +132,7 @@ async def test_one_partial_leaf_uses_one_saved_slot_for_fresh_data(tmp_path: Pat
 
     await coordinator.async_refresh()
 
-    assert len(api.requests) == 6
+    assert len(api.requests) == 5
     assert Counter(api.requests)[HEAT_PUMP] == 2
     assert coordinator.data["compressor_frequency_actual"] == 23
     assert coordinator.data["actual_flow_rate"] == 1.2
@@ -166,14 +167,62 @@ async def test_empty_pages_respect_budget_and_rediscover_next_cycle(tmp_path: Pa
 
 @pytest.mark.asyncio
 async def test_rejected_login_does_not_probe_cached_routes(tmp_path: Path) -> None:
-    """Stop at the root when WebIF requires authentication."""
+    """Stop after the first warm request when WebIF requires authentication."""
     api, coordinator = await setup_wem(tmp_path)
-    api.pages[ROOT] = "<title>Login</title>"
+    good_page = api.pages[PUMP]
+    api.pages[PUMP] = "<title>Login</title>"
 
     await coordinator.async_refresh()
 
-    assert api.requests == [ROOT]
+    assert api.requests == [PUMP]
     assert not coordinator.last_update_success
+    api.requests.clear()
+    api.pages[PUMP] = good_page
+    await coordinator.async_refresh()
+    assert len(api.requests) == 7
+    assert api.requests[0] == ROOT
+
+
+@pytest.mark.asyncio
+async def test_firmware_change_in_cached_report_triggers_rediscovery(
+    tmp_path: Path,
+) -> None:
+    """Learn firmware from a verified leaf and rediscover only on the next poll."""
+    api, coordinator = await setup_wem(tmp_path)
+    pump_report = api.pages[PUMP]
+    api.pages[PUMP] = pump_report + "<p>WWP-CPU COM V5.2 Rev. 14</p>"
+    await coordinator.async_refresh()
+    assert coordinator.controller_firmware == "WWP-CPU COM V5.2 R14"
+    assert len(api.requests) == 4
+    api.requests.clear()
+
+    api.pages[PUMP] = pump_report + "<p>WWP-CPU COM V5.2 Rev. 15</p>"
+    await coordinator.async_refresh()
+    assert coordinator.controller_firmware == "WWP-CPU COM V5.2 R15"
+    assert len(api.requests) == 4
+
+    api.requests.clear()
+    await coordinator.async_refresh()
+    assert api.requests[0] == ROOT
+    assert len(api.requests) == 7
+
+
+@pytest.mark.asyncio
+async def test_persistent_report_failure_does_not_replay_old_values(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Refresh healthy reports while keeping fields from an absent report unavailable."""
+    api, coordinator = await setup_wem(tmp_path)
+    api.pages[HEAT_PUMP] = api.main_menu
+    api.pages[HEATER] = info("Betriebsstunden E1", "38 h")
+
+    await coordinator.async_refresh()
+
+    assert len(api.requests) == 5
+    assert coordinator.last_update_success
+    assert coordinator.data["electric_heater_1_operating_hours"] == 38
+    assert "compressor_frequency_actual" not in coordinator.data
+    assert "Wärmepumpe (2 missing)" in caplog.text
 
 
 @pytest.mark.asyncio
@@ -185,8 +234,8 @@ async def test_modbus_can_acquire_lock_between_wem_requests(tmp_path: Path) -> N
     release = asyncio.Event()
     modbus_seen_after = []
 
-    async def pause_root(method: str, path: str) -> SimpleNamespace:
-        if path == ROOT:
+    async def pause_first_leaf(method: str, path: str) -> SimpleNamespace:
+        if path == PUMP:
             entered.set()
             await release.wait()
         return await original(method, path)
@@ -195,7 +244,7 @@ async def test_modbus_can_acquire_lock_between_wem_requests(tmp_path: Path) -> N
         async with api.lock:
             modbus_seen_after.append(list(api.requests))
 
-    api._request = pause_root
+    api._request = pause_first_leaf
     refreshing = asyncio.create_task(coordinator.async_refresh())
     await asyncio.wait_for(entered.wait(), timeout=1)
     polling = asyncio.create_task(modbus_poll())
@@ -203,5 +252,90 @@ async def test_modbus_can_acquire_lock_between_wem_requests(tmp_path: Path) -> N
     release.set()
     await asyncio.wait_for(asyncio.gather(refreshing, polling), timeout=1)
 
-    assert modbus_seen_after == [[ROOT]]
-    assert len(api.requests) == 5
+    assert modbus_seen_after == [[PUMP]]
+    assert len(api.requests) == 4
+
+
+@pytest.mark.asyncio
+async def test_three_incomplete_reports_recover_within_one_poll(tmp_path: Path) -> None:
+    """Replay one missed response each for the three report groups lost at 18:31."""
+    api, coordinator = await setup_wem(tmp_path)
+    api.pages[PUMP] = "".join(
+        f"<a>{label} {value}</a>"
+        for label, value in (
+            ("Regelungsart Heizen", "Konstantbetrieb"),
+            ("Regelungsart WW", "Konstantbetrieb"),
+            ("Regelungsart Kühlen", "Konstantbetrieb"),
+            ("Funktion", "Zubringerpumpe"),
+            ("Freigabe bei EVU-Sperre", "Aus"),
+        )
+    )
+    api.pages[HEATING_CIRCUIT] = (
+        info("AT Mittelwert", "7 °C")
+        + info("AT Langzeitwert", "6 °C")
+        + info("Vorlauftemperatur", "33 °C")
+    )
+    api.pages[HEAT_PUMP] = "".join(
+        info(label, value)
+        for label, value in (
+            ("Volumenstrom", "1.0 m³/h"),
+            ("Drehzahl Pumpe M1", "55 %"),
+            ("Schaltspiele Verdichter", "50"),
+            ("Schaltspiele Abtauen", "2"),
+            ("Stellung Umschaltventil", "Heizkreis"),
+            ("Soll Frequenz Verdichter", "22 Hz"),
+            ("Ist Frequenz Verdichter", "20 Hz"),
+            ("Betriebsstd. Verdichter", "210 h"),
+            ("Solltemperatur", "35 °C"),
+            ("Wärmetauscher AG Eintritt", "6 °C"),
+            ("Wärmetauscher AG Mitte", "6 °C"),
+            ("Druckgas", "60 °C"),
+            ("Wärmetauscher Innen", "31 °C"),
+            ("Kältemittel Innen", "28 °C"),
+            ("Version WWP-SG", "V5.2 R14"),
+            ("Version WWP-CPU", "V5.2 R14"),
+            ("Aussengerät Variante", "WSB 8-B"),
+        )
+    )
+    await coordinator.async_refresh()
+    assert len(coordinator.data) == 26
+    api.requests.clear()
+
+    # Each failed first response looks like navigation, as seen on the wire.
+    for path in (PUMP, HEATER, HEAT_PUMP):
+        api.next_response[path] = api.main_menu
+    api.pages[HEAT_PUMP] = api.pages[HEAT_PUMP].replace("20 Hz", "23 Hz")
+    api.pages[HEATER] = info("Betriebsstunden E1", "38 h")
+    await coordinator.async_refresh()
+
+    assert len(coordinator.data) == 26
+    assert coordinator.data["compressor_frequency_actual"] == 23
+    assert coordinator.data["electric_heater_1_operating_hours"] == 38
+    assert Counter(api.requests) == {
+        PUMP: 2,
+        HEATER: 2,
+        HEAT_PUMP: 2,
+        HEATING_CIRCUIT: 1,
+    }
+
+
+@pytest.mark.asyncio
+async def test_transport_timeout_does_not_enter_cooldown_under_shared_lock(
+    tmp_path: Path,
+) -> None:
+    """Stop after a transport error and keep earlier fresh fields available."""
+    api, coordinator = await setup_wem(tmp_path)
+    original = api._request
+
+    async def fail_heater(method: str, path: str) -> SimpleNamespace:
+        if path == HEATER:
+            api.requests.append(path)
+            raise ConnectionTimeoutError("synthetic timeout")
+        return await original(method, path)
+
+    api._request = fail_heater
+    await coordinator.async_refresh()
+
+    assert api.requests == [PUMP, HEATER]
+    assert coordinator.data == {"pump_regulation_heating": "constant_speed"}
+    assert not api.lock.locked()
