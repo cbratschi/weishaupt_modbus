@@ -375,7 +375,8 @@ async def test_async_setup_entry_with_webif(wsb_profile: bool) -> None:
 
     with (
         patch(
-            "custom_components.weishaupt_modbus.WebifConnection",
+            "custom_components.weishaupt_modbus."
+            + ("WsbWebifConnection" if wsb_profile else "WebifConnection"),
             return_value=webif_api,
         ) as mock_webif,
         patch(

@@ -1,6 +1,7 @@
 """Read optional WSB values that do not have a verified Modbus mapping."""
 
 import asyncio
+from collections import deque
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
 from datetime import timedelta
@@ -9,6 +10,7 @@ import math
 import re
 
 from bs4 import BeautifulSoup
+from httpx import AsyncClient, Request
 from weishaupt_webif_api import WebifConnection
 from weishaupt_webif_api.exceptions import (
     McuResourceError,
@@ -337,7 +339,7 @@ _REPORT_KEYS = frozenset(
 )
 
 
-class _ExportBudgetExhausted(ValueError):
+class _ExportBudgetExhausted(WeishauptWebifError):
     """No export requests remain in this poll."""
 
 
@@ -354,13 +356,33 @@ class _ReportRoute:
     empty_polls: int = 0
 
 
+class WsbWebifConnection(WebifConnection):
+    """Count WSB export GETs on the wire, including client replays."""
+
+    export_requests = 0
+
+    async def _get_client(self) -> AsyncClient:
+        client = await super()._get_client()
+        hooks = client.event_hooks["request"]
+        if self._count_export not in hooks:
+            hooks.append(self._count_export)
+        return client
+
+    async def _count_export(self, request: Request) -> None:
+        # A login may trigger another GET within a single library call.
+        if request.method == "GET" and request.url.path == _ROOT:
+            if self.export_requests >= _MAX_EXPORT_REQUESTS:
+                raise _ExportBudgetExhausted
+            self.export_requests += 1
+
+
 class WsbWebifCoordinator(DataUpdateCoordinator[dict[str, int | float | str]]):
     """Keep WEM availability independent of the Modbus coordinator."""
 
     def __init__(
         self,
         hass: HomeAssistant,
-        api: WebifConnection | None,
+        api: WsbWebifConnection | None,
         mcu_lock: asyncio.Lock,
         *,
         config_entry: MyConfigEntry | None = None,
@@ -421,18 +443,18 @@ class WsbWebifCoordinator(DataUpdateCoordinator[dict[str, int | float | str]]):
         return page
 
     async def _async_update_data(self) -> dict[str, int | float | str]:
-        if self.api is None:
+        api = self.api
+        if api is None:
             return {}
 
-        requests = 0
+        api.export_requests = 0
         firmware: str | None = None
         expected = {key: route.fields for key, route in self._routes.items()}
 
         async def get_page(path: str) -> BeautifulSoup:
-            nonlocal requests, firmware
-            if requests >= _MAX_EXPORT_REQUESTS:
+            nonlocal firmware
+            if api.export_requests >= _MAX_EXPORT_REQUESTS:
                 raise _ExportBudgetExhausted
-            requests += 1
             page = await self._get_page(path)
             if match := _CONTROLLER_FIRMWARE.search(page.get_text(" ", strip=True)):
                 firmware = f"WWP-CPU COM V{match[1]} R{match[2]}"
@@ -456,12 +478,13 @@ class WsbWebifCoordinator(DataUpdateCoordinator[dict[str, int | float | str]]):
                 self._routes.clear()
             interruption = type(err).__name__
             if not values:
-                raise UpdateFailed(f"WEM export unavailable ({interruption})") from None
+                raise UpdateFailed(
+                    f"WEM export unavailable ({interruption}) "
+                    f"after {api.export_requests} export calls"
+                ) from None
 
         if firmware is not None:
             self._update_controller_firmware(firmware)
-        if not values:
-            raise UpdateFailed("No supported WSB fields in WEM export")
 
         incomplete = [
             f"{parent}/{child} ({len(fields - values.keys())} missing)"
@@ -471,9 +494,17 @@ class WsbWebifCoordinator(DataUpdateCoordinator[dict[str, int | float | str]]):
         if interruption:
             incomplete.append(interruption)
         detail = ", ".join(incomplete) or None
+        if not values:
+            missing = f". {detail}" if detail else ""
+            raise UpdateFailed(
+                f"No supported WSB fields in WEM export "
+                f"after {api.export_requests} export calls{missing}"
+            )
         if detail is not None and detail != self._last_partial_poll:
             _LOGGER.warning(
-                "Incomplete WSB WEM poll after %d export calls. %s", requests, detail
+                "Incomplete WSB WEM poll after %d export calls. %s",
+                api.export_requests,
+                detail,
             )
         self._last_partial_poll = detail
         return values
@@ -540,8 +571,10 @@ class WsbWebifCoordinator(DataUpdateCoordinator[dict[str, int | float | str]]):
                     )
                     retry.append((key, cached, parse))
 
-        # Discovery takes priority. Retry each incomplete cached report once.
-        for key, cached, parse in retry:
+        # Give each incomplete cached report a turn before retrying it again.
+        pending = deque(retry)
+        while pending:
+            key, cached, parse = pending.popleft()
             try:
                 current = parse(await get_page(cached.path))
             except _ExportBudgetExhausted:
@@ -556,6 +589,9 @@ class WsbWebifCoordinator(DataUpdateCoordinator[dict[str, int | float | str]]):
                 self._routes[key] = _ReportRoute(
                     cached.path, cached.fields | frozenset(current)
                 )
+
+            if not cached.fields <= values.keys():
+                pending.append((key, cached, parse))
 
         # A successful read replaces its route. Keep an empty route through
         # one poll so discovery cannot take the next poll's retry slots.

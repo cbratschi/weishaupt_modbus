@@ -5,10 +5,14 @@ from collections import Counter
 from pathlib import Path
 from types import SimpleNamespace
 
+from httpx import AsyncClient, MockTransport, Request, Response
 import pytest
 from weishaupt_webif_api.exceptions import ConnectionTimeoutError
 
-from custom_components.weishaupt_modbus.webif.wsb import WsbWebifCoordinator
+from custom_components.weishaupt_modbus.webif.wsb import (
+    WsbWebifConnection,
+    WsbWebifCoordinator,
+)
 from homeassistant.core import HomeAssistant
 
 ROOT = "/settings_export.html"
@@ -39,6 +43,7 @@ class WemPages:
         """Initialize a healthy controller."""
         self.lock = lock
         self.requests: list[str] = []
+        self.export_requests = 0
         self.next_response: dict[str, str] = {}
         self.main_menu = (
             link(PUMP_MENU, "Wärmepumpe")
@@ -71,6 +76,7 @@ class WemPages:
         assert self.lock.locked()
         assert method == "GET"
         self.requests.append(path)
+        self.export_requests += 1
         await asyncio.sleep(0)
         return SimpleNamespace(
             status_code=200, text=self.next_response.pop(path, self.pages[path])
@@ -180,7 +186,9 @@ async def test_one_partial_leaf_uses_one_saved_slot_for_fresh_data(tmp_path: Pat
 
 
 @pytest.mark.asyncio
-async def test_persistently_empty_pages_respect_budget_and_rediscover(tmp_path: Path) -> None:
+async def test_persistently_empty_pages_respect_budget_and_rediscover(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
     """Expose a prolonged outage and accept relocated leaf URLs on recovery."""
     api, coordinator = await setup_wem(tmp_path)
     healthy = dict(api.pages)
@@ -192,6 +200,8 @@ async def test_persistently_empty_pages_respect_budget_and_rediscover(tmp_path: 
     assert len(api.requests) == 7
     assert max(Counter(api.requests).values()) == 2
     assert not coordinator.last_update_success
+    assert "No supported WSB fields in WEM export after 7 export calls" in caplog.text
+    assert "Info/2. WEZ (1 missing)" in caplog.text
 
     api.requests.clear()
     await coordinator.async_refresh()
@@ -266,7 +276,7 @@ async def test_persistent_report_failure_does_not_replay_old_values(
 
     await coordinator.async_refresh()
 
-    assert len(api.requests) == 5
+    assert len(api.requests) == 7
     assert coordinator.last_update_success
     assert coordinator.data["electric_heater_1_operating_hours"] == 38
     assert "compressor_frequency_actual" not in coordinator.data
@@ -386,3 +396,90 @@ async def test_one_empty_poll_keeps_routes_and_retry_capacity(tmp_path: Path) ->
         HEAT_PUMP: 2,
         HEATING_CIRCUIT: 2,
     }
+
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("empty_responses", [2, 3])
+async def test_e1_recovers_in_spare_slots(
+    tmp_path: Path, empty_responses: int
+) -> None:
+    """Recover a delayed E1 report before the next five-minute poll."""
+    api, coordinator = await setup_wem(tmp_path)
+    populate_all_wem_reports(api)
+    api.pages[HEATER] = info("Betriebsstunden E1", "38 h")
+    original = api._request
+
+    async def intermittently_empty(method: str, path: str) -> SimpleNamespace:
+        if path == HEATER and api.requests.count(HEATER) < empty_responses:
+            api.next_response[path] = api.main_menu
+        return await original(method, path)
+
+    api._request = intermittently_empty
+    await coordinator.async_refresh()
+
+    assert api.requests == [
+        PUMP,
+        HEATER,
+        HEAT_PUMP,
+        HEATING_CIRCUIT,
+        *([HEATER] * empty_responses),
+    ]
+    assert coordinator.data["electric_heater_1_operating_hours"] == 38
+    assert len(coordinator.data) == 26
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("expiry_slot", [1, 7])
+async def test_session_replay_counts_towards_wire_limit(
+    tmp_path: Path, expiry_slot: int
+) -> None:
+    """Count the pinned client's automatic session replay as an export GET."""
+    pages = WemPages(asyncio.Lock())
+    populate_all_wem_reports(pages)
+    wire = []
+    expire = False
+
+    def serve(request: Request) -> Response:
+        if request.method == "POST" and request.url.path == "/login.html":
+            return Response(303, headers={"Location": "/home.html"})
+        if request.url.path == "/home.html":
+            return Response(200, text="Home")
+        assert request.method == "GET"
+        path = request.url.raw_path.decode("ascii")
+        wire.append(path)
+        if expire and len(wire) == expiry_slot:
+            return Response(200, text='<input name="pass">')
+        if expire and expiry_slot == 7 and path in (PUMP, HEATER, HEAT_PUMP):
+            return Response(200, text=pages.main_menu)
+        return Response(200, text=pages.pages[path])
+
+    api = WsbWebifConnection(
+        "example.invalid", "fixture", "fixture", request_delay=0, storage_path=tmp_path
+    )
+    coordinator = WsbWebifCoordinator(HomeAssistant(str(tmp_path)), api, pages.lock)
+    async with AsyncClient(
+        base_url="http://example.invalid", transport=MockTransport(serve),
+        follow_redirects=True,
+    ) as http:
+        api._client = http
+        await coordinator.async_refresh()
+        assert len(wire) == 7
+        assert len(coordinator.data) == 26
+
+        wire.clear()
+        expire = True
+        await coordinator.async_refresh()
+        assert api.export_requests == len(wire)
+        if expiry_slot == 1:
+            assert wire == [PUMP, PUMP, HEATER, HEAT_PUMP, HEATING_CIRCUIT]
+            assert len(coordinator.data) == 26
+        else:
+            assert wire == [PUMP, HEATER, HEAT_PUMP, HEATING_CIRCUIT, PUMP, HEATER, HEAT_PUMP]
+            assert len(coordinator.data) == 3
+
+        wire.clear()
+        expire = False
+        await coordinator.async_refresh()
+        assert wire == [PUMP, HEATER, HEAT_PUMP, HEATING_CIRCUIT]
+        assert len(coordinator.data) == 26
