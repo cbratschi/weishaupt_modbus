@@ -4,6 +4,7 @@ import asyncio
 from collections import Counter
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from httpx import AsyncClient, MockTransport, Request, Response
 import pytest
@@ -483,3 +484,140 @@ async def test_session_replay_counts_towards_wire_limit(
         await coordinator.async_refresh()
         assert wire == [PUMP, HEATER, HEAT_PUMP, HEATING_CIRCUIT]
         assert len(coordinator.data) == 26
+
+
+_HEADER_ONLY = "<html><body><p>WWP-CPU COM V5.2 Rev. 14</p></body></html>"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("blank_seconds", "waits", "request_count", "available"),
+    [(0, [], 4, 26), (10, [12], 5, 26), (28, [12, 24], 6, 26), (90, [12, 24], 7, 0)],
+)
+async def test_timed_header_only_burst(
+    tmp_path: Path,
+    blank_seconds: int,
+    waits: list[int],
+    request_count: int,
+    available: int,
+) -> None:
+    """Let a burst of blank exports pass without raising the wire request limit."""
+    pages = WemPages(asyncio.Lock())
+    populate_all_wem_reports(pages)
+    wire = []
+    modbus_during_wait = []
+    elapsed = blank_seconds
+
+    def serve(request: Request) -> Response:
+        nonlocal elapsed
+        assert request.method == "GET"
+        assert pages.lock.locked()
+        path = request.url.raw_path.decode("ascii")
+        wire.append(path)
+        elapsed += 1
+        page = _HEADER_ONLY if elapsed <= blank_seconds else pages.pages[path]
+        return Response(200, text=page)
+
+    async def wait_for_render(delay: int) -> None:
+        nonlocal elapsed
+        async with pages.lock:
+            modbus_during_wait.append(delay)
+        elapsed += delay
+
+    api = WsbWebifConnection(
+        "example.invalid", "fixture", "fixture", request_delay=0, storage_path=tmp_path
+    )
+    coordinator = WsbWebifCoordinator(HomeAssistant(str(tmp_path)), api, pages.lock)
+    async with AsyncClient(
+        base_url="http://example.invalid", transport=MockTransport(serve)
+    ) as http:
+        api._client = http
+        await coordinator.async_refresh()
+        assert len(wire) == 7 and len(coordinator.data) == 26
+        wire.clear()
+        elapsed = 0
+        pages.pages[HEAT_PUMP] = pages.pages[HEAT_PUMP].replace("1.0 m³/h", "1.3 m³/h")
+        with patch.object(coordinator, "_wait_for_export_render", new=wait_for_render):
+            await coordinator.async_refresh()
+
+        assert len(wire) == api.export_requests == request_count
+        assert modbus_during_wait == waits
+        if available:
+            assert coordinator.last_update_success
+            assert len(coordinator.data) == available
+            assert coordinator.data["actual_flow_rate"] == 1.3
+        else:
+            assert not coordinator.last_update_success
+
+        wire.clear()
+        elapsed = blank_seconds
+        await coordinator.async_refresh()
+        assert wire == [PUMP, HEATER, HEAT_PUMP, HEATING_CIRCUIT]
+        assert coordinator.last_update_success and len(coordinator.data) == 26
+
+
+@pytest.mark.asyncio
+async def test_coordinator_serializes_refreshes_during_render_wait(tmp_path: Path) -> None:
+    """Keep a queued manual refresh outside the current poll budget."""
+    api, coordinator = await setup_wem(tmp_path)
+    populate_all_wem_reports(api)
+    api.next_response[PUMP] = _HEADER_ONLY
+    paused = asyncio.Event()
+    resume = asyncio.Event()
+
+    async def wait_for_render(_delay: int) -> None:
+        paused.set()
+        await resume.wait()
+
+    with patch.object(coordinator, "_wait_for_export_render", new=wait_for_render):
+        scheduled = asyncio.create_task(coordinator.async_refresh())
+        await asyncio.wait_for(paused.wait(), timeout=1)
+        manual = asyncio.create_task(coordinator.async_refresh())
+        await asyncio.sleep(0)
+        assert api.requests == [PUMP]
+        resume.set()
+        await asyncio.wait_for(asyncio.gather(scheduled, manual), timeout=1)
+    assert api.requests[:5] == [PUMP, HEATER, HEAT_PUMP, HEATING_CIRCUIT, PUMP]
+    assert api.requests[5:] == [PUMP, HEATER, HEAT_PUMP, HEATING_CIRCUIT]
+    assert api.export_requests == 4
+    assert len(coordinator.data) == 26 and coordinator.last_update_success
+
+
+@pytest.mark.asyncio
+async def test_shutdown_interrupts_render_wait(tmp_path: Path) -> None:
+    """A shutdown wakes a delayed poll before another GET can be sent."""
+    api, coordinator = await setup_wem(tmp_path)
+    api.next_response[PUMP] = _HEADER_ONLY
+    entered = asyncio.Event()
+    original_wait = coordinator._wait_for_export_render
+
+    async def signal_wait(delay: int) -> None:
+        entered.set()
+        await original_wait(delay)
+
+    with patch.object(coordinator, "_wait_for_export_render", new=signal_wait):
+        refresh = asyncio.create_task(coordinator.async_refresh())
+        await asyncio.wait_for(entered.wait(), timeout=1)
+        await coordinator.async_shutdown()
+        await asyncio.wait_for(refresh, timeout=1)
+    assert isinstance(coordinator.last_exception, asyncio.CancelledError)
+    assert api.requests == [PUMP]
+
+
+@pytest.mark.asyncio
+async def test_busy_controller_aborts_without_render_wait(tmp_path: Path) -> None:
+    """A busy HTTP response stops the poll without retrying or waiting."""
+    api, coordinator = await setup_wem(tmp_path)
+    original = api._request
+
+    async def busy(method: str, path: str) -> SimpleNamespace:
+        result = await original(method, path)
+        result.status_code = 503
+        return result
+
+    api._request = busy
+    with patch.object(coordinator, "_wait_for_export_render") as wait:
+        await coordinator.async_refresh()
+    assert api.requests == [PUMP]
+    assert not coordinator.last_update_success
+    wait.assert_not_called()

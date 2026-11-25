@@ -50,6 +50,8 @@ _ROOT = "/settings_export.html"
 WSB_REQUEST_DELAY_SECONDS = 1.0
 _REQUEST_TIMEOUT = 10
 _MAX_EXPORT_REQUESTS = 7
+_RENDER_RECOVERY_DELAYS = (12, 24)
+_INFO_ROW_SELECTOR = "div.nav-link.browseobj"
 _EXPORT_LINK = re.compile(r"/settings_export\.html\?stack=[0-9a-fA-F,]+")
 _CONTROLLER_FIRMWARE = re.compile(r"\bWWP-CPU COM V(\d+\.\d+) Rev\.\s*(\d+)\b")
 _FLOW_VALUE = re.compile(r"(\d+(?:[.,]\d+)?)\s*m\s*[3³]\s*/\s*h")
@@ -262,7 +264,7 @@ def _info_values(
     page: BeautifulSoup, fields: tuple[WsbField, ...]
 ) -> dict[str, int | float | str]:
     rows: dict[str, list[str]] = {}
-    for row in page.select("div.nav-link.browseobj"):
+    for row in page.select(_INFO_ROW_SELECTOR):
         if heading := row.find("h5"):
             label = heading.get_text(" ", strip=True)
             raw = row.get_text(" ", strip=True).removeprefix(label).strip()
@@ -400,6 +402,7 @@ class WsbWebifCoordinator(DataUpdateCoordinator[dict[str, int | float | str]]):
         self.controller_firmware: str | None = None
         self._routes: dict[tuple[str, str], _ReportRoute] = {}
         self._last_partial_poll: str | None = None
+        self._shutdown_started = asyncio.Event()
 
     def _update_controller_firmware(self, firmware: str) -> None:
         if firmware == self.controller_firmware:
@@ -413,6 +416,11 @@ class WsbWebifCoordinator(DataUpdateCoordinator[dict[str, int | float | str]]):
                 registry, self.config_entry.entry_id
             ):
                 registry.async_update_device(device.id, sw_version=firmware)
+
+    async def async_shutdown(self) -> None:
+        """Cancel render recovery waits when HA stops this coordinator."""
+        self._shutdown_started.set()
+        await super().async_shutdown()
 
     async def async_close(self) -> None:
         """Stop WEM requests before closing the shared HTTP session."""
@@ -509,6 +517,14 @@ class WsbWebifCoordinator(DataUpdateCoordinator[dict[str, int | float | str]]):
         self._last_partial_poll = detail
         return values
 
+    async def _wait_for_export_render(self, delay: int) -> None:
+        try:
+            async with asyncio.timeout(delay):
+                await self._shutdown_started.wait()
+        except TimeoutError:
+            return
+        raise asyncio.CancelledError
+
     async def _read_reports(
         self,
         get_page: Callable[[str], Awaitable[BeautifulSoup]],
@@ -523,6 +539,33 @@ class WsbWebifCoordinator(DataUpdateCoordinator[dict[str, int | float | str]]):
                 Callable[[BeautifulSoup], dict[str, int | float | str]],
             ]
         ] = []
+        delays = iter(_RENDER_RECOVERY_DELAYS)
+
+        async def read_leaf(
+            path: str,
+            parse: Callable[[BeautifulSoup], dict[str, int | float | str]],
+            *,
+            known_route: bool,
+        ) -> dict[str, int | float | str]:
+            page = await get_page(path)
+            current = parse(page)
+            api = self.api
+            if (
+                not current
+                and known_route
+                and api is not None
+                and api.export_requests < _MAX_EXPORT_REQUESTS
+                and page.find("a", href=_EXPORT_LINK) is None
+                and page.select_one(_INFO_ROW_SELECTOR) is None
+                and _CONTROLLER_FIRMWARE.search(page.get_text(" ", strip=True))
+                and (delay := next(delays, None)) is not None
+            ):
+                # A header-only reply can be transient.
+                # Wait outside the MCU lock so Modbus can keep polling.
+                _LOGGER.debug("Incomplete WEM export header; pausing for %ds", delay)
+                await self._wait_for_export_render(delay)
+            return current
+
         for first, pages in _REPORT_PAGES:
             section = None
             if root is not None and any(
@@ -546,7 +589,9 @@ class WsbWebifCoordinator(DataUpdateCoordinator[dict[str, int | float | str]]):
                         path = _menu(page, second, parent=parent)
                     else:
                         continue
-                    current = parse(await get_page(path))
+                    current = await read_leaf(
+                        path, parse, known_route=cached is not None
+                    )
                 except ValueError as err:
                     self._routes.pop(key, None)
                     _LOGGER.debug(
@@ -576,7 +621,7 @@ class WsbWebifCoordinator(DataUpdateCoordinator[dict[str, int | float | str]]):
         while pending:
             key, cached, parse = pending.popleft()
             try:
-                current = parse(await get_page(cached.path))
+                current = await read_leaf(cached.path, parse, known_route=True)
             except _ExportBudgetExhausted:
                 break
             except ValueError as err:
