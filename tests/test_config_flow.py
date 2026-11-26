@@ -4,7 +4,7 @@ from custom_components.weishaupt_modbus.config_flow import (
     ConfigFlow,
     ConnectionFailed,
     build_kennfeld_list,
-    test_modbus,
+    test_modbus as check_modbus_connection,
 )
 from custom_components.weishaupt_modbus.const import CONF, CONST
 import probatio
@@ -593,7 +593,7 @@ async def test_test_modbus_success() -> None:
         "custom_components.weishaupt_modbus.config_flow.ModbusConnection",
         return_value=connection,
     ):
-        assert await test_modbus("10.10.1.225", 502) is True
+        assert await check_modbus_connection("10.10.1.225", 502) is True
 
     connection.connect.assert_awaited_once()
     connection.close.assert_awaited_once()
@@ -609,7 +609,7 @@ async def test_test_modbus_connection_failed() -> None:
         return_value=connection,
     ):
         with pytest.raises(ConnectionFailed):
-            await test_modbus("10.10.1.225", 502)
+            await check_modbus_connection("10.10.1.225", 502)
 
     connection.close.assert_awaited_once()
 

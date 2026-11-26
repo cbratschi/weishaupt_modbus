@@ -91,6 +91,7 @@ async def test_sensor_setup(hass: HomeAssistant):
     coordinator = MagicMock()
     config_entry.runtime_data.weishaupt_coordinator = coordinator
     config_entry.runtime_data.webif_coordinator = None
+    config_entry.runtime_data.wsb_coordinator = None
 
     sensor_description = make_description(SensorDescription)
     number_description = make_description(NumberDescription)
