@@ -20,6 +20,7 @@ from .webif.wsb import (
     WSB_REQUEST_DELAY_SECONDS,
     WsbWebifConnection,
     WsbWebifCoordinator,
+    wsb_route_store,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -30,6 +31,12 @@ PLATFORMS: list[str] = [
     "sensor",
     #    "switch",
 ]
+
+
+async def async_remove_entry(hass: HomeAssistant, entry: MyConfigEntry) -> None:
+    """Remove the optional WEM discovery cache when the entry is deleted."""
+    if entry.data.get(CONF.WSB_READ_ONLY):
+        await wsb_route_store(hass, entry.entry_id).async_remove()
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: MyConfigEntry) -> bool:

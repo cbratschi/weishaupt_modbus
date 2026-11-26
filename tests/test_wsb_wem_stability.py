@@ -3,17 +3,20 @@
 import asyncio
 from collections import Counter
 from pathlib import Path
-from types import SimpleNamespace
+from types import MappingProxyType, SimpleNamespace
 from unittest.mock import patch
 
 from httpx import AsyncClient, MockTransport, Request, Response
 import pytest
 from weishaupt_webif_api.exceptions import ConnectionTimeoutError
 
+from custom_components.weishaupt_modbus.const import CONF, CONST
 from custom_components.weishaupt_modbus.webif.wsb import (
     WsbWebifConnection,
     WsbWebifCoordinator,
+    wsb_route_store,
 )
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
 ROOT = "/settings_export.html"
@@ -554,6 +557,135 @@ async def test_timed_header_only_burst(
         await coordinator.async_refresh()
         assert wire == [PUMP, HEATER, HEAT_PUMP, HEATING_CIRCUIT]
         assert coordinator.last_update_success and len(coordinator.data) == 26
+
+
+def make_wsb_entry(host: str = "example.invalid") -> ConfigEntry:
+    """Create a native HA entry with a stable identity across restarts."""
+    return ConfigEntry(
+        data={CONF.HOST: host, CONF.WSB_READ_ONLY: True},
+        discovery_keys=MappingProxyType({}),
+        domain=CONST.DOMAIN,
+        entry_id="wsb-fixture",
+        minor_version=1,
+        options={},
+        source="user",
+        subentries_data=None,
+        title="WSB fixture",
+        unique_id=None,
+        version=1,
+    )
+
+
+@pytest.mark.parametrize("burst_seconds", [0, 28])
+async def test_restart_reuses_verified_routes_within_wire_budget(
+    hass: HomeAssistant, tmp_path: Path, burst_seconds: int
+) -> None:
+    """A new coordinator can recover every reading on its first poll."""
+    entry = make_wsb_entry()
+    pages = WemPages(asyncio.Lock())
+    populate_all_wem_reports(pages)
+    pages.pages[ROOT] = _HEADER_ONLY + pages.main_menu
+    wire = []
+    waits = []
+    restarting = False
+    elapsed = 0
+
+    def serve(request: Request) -> Response:
+        nonlocal elapsed
+        assert request.method == "GET"
+        assert pages.lock.locked()
+        path = request.url.raw_path.decode("ascii")
+        wire.append(path)
+        if restarting:
+            elapsed += 1
+            if elapsed <= burst_seconds:
+                return Response(200, text=_HEADER_ONLY)
+            if burst_seconds == 0 and path == HEAT_PUMP and wire.count(HEAT_PUMP) == 1:
+                return Response(200, text=_HEADER_ONLY)
+        return Response(200, text=pages.pages[path])
+
+    async def wait_for_render(delay: int) -> None:
+        nonlocal elapsed
+        async with pages.lock:
+            waits.append(delay)
+        elapsed += delay
+
+    api = WsbWebifConnection(
+        "example.invalid", "fixture", "fixture", request_delay=0, storage_path=tmp_path
+    )
+    async with AsyncClient(
+        base_url="http://example.invalid", transport=MockTransport(serve)
+    ) as http:
+        api._client = http
+        coordinator = WsbWebifCoordinator(hass, api, pages.lock, config_entry=entry)
+        await coordinator.async_refresh()
+        assert len(wire) == 7 and len(coordinator.data) == 26
+        stored = await wsb_route_store(hass, entry.entry_id).async_load()
+        assert stored is not None and len(stored["reports"]) == 4
+        assert {key for report in stored["reports"].values() for key in report} == {
+            "path",
+            "fields",
+        }
+
+        await coordinator.async_shutdown()
+        wire.clear()
+        restarting = True
+        pages.pages[HEAT_PUMP] = pages.pages[HEAT_PUMP].replace(
+            "1.0 m³/h", "1.3 m³/h"
+        )
+        restarted = WsbWebifCoordinator(hass, api, pages.lock, config_entry=entry)
+        with patch.object(restarted, "_wait_for_export_render", new=wait_for_render):
+            await restarted.async_refresh()
+
+        assert restarted.last_update_success
+        assert len(restarted.data) == 26
+        assert restarted.data["actual_flow_rate"] == 1.3
+        assert wire[:5] == [ROOT, PUMP, HEATER, HEAT_PUMP, HEATING_CIRCUIT]
+        assert len(wire) == api.export_requests == (7 if burst_seconds else 6)
+        assert waits == ([12, 24] if burst_seconds else [12])
+        await restarted.async_shutdown()
+
+
+@pytest.mark.parametrize("change", ["firmware", "endpoint", "route", "no_header"])
+async def test_restart_ignores_unverified_cache(
+    hass: HomeAssistant, change: str
+) -> None:
+    """Discover afresh if the stored routes cannot be used safely."""
+    entry = make_wsb_entry()
+    api = WemPages(asyncio.Lock())
+    populate_all_wem_reports(api)
+    api.pages[ROOT] = _HEADER_ONLY + api.main_menu
+
+    coordinator = WsbWebifCoordinator(hass, api, api.lock, config_entry=entry)
+    await coordinator.async_refresh()
+    await coordinator.async_shutdown()
+    store = wsb_route_store(hass, entry.entry_id)
+    cached = await store.async_load()
+    assert cached is not None
+    if change == "firmware":
+        api.pages[ROOT] = api.pages[ROOT].replace("Rev. 14", "Rev. 15")
+    elif change == "endpoint":
+        entry = make_wsb_entry("other.example.invalid")
+    elif change == "route":
+        next(iter(cached["reports"].values()))["path"] = "/other.html"
+        await store.async_save(cached)
+    else:
+        api.pages[ROOT] = api.main_menu
+
+    api.requests.clear()
+    restarted = WsbWebifCoordinator(hass, api, api.lock, config_entry=entry)
+    await restarted.async_refresh()
+    assert api.requests == [
+        ROOT,
+        PUMP_MENU,
+        PUMP,
+        INFO_MENU,
+        HEATER,
+        HEAT_PUMP,
+        HEATING_CIRCUIT,
+    ]
+    assert restarted.last_update_success and len(restarted.data) == 26
+    await restarted.async_shutdown()
 
 
 @pytest.mark.asyncio

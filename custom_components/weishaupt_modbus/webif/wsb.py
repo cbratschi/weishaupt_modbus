@@ -5,9 +5,11 @@ from collections import deque
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
 from datetime import timedelta
+from hashlib import sha256
 import logging
 import math
 import re
+from typing import TypedDict
 
 from bs4 import BeautifulSoup
 from httpx import AsyncClient, Request
@@ -22,7 +24,7 @@ from custom_components.weishaupt_modbus.configentry import (
     MyConfigEntry,
     entity_identity,
 )
-from custom_components.weishaupt_modbus.const import CONST
+from custom_components.weishaupt_modbus.const import CONF, CONST
 from homeassistant.components.sensor import (
     SensorDeviceClass,
     SensorEntity,
@@ -37,8 +39,10 @@ from homeassistant.const import (
     UnitOfVolumeFlowRate,
 )
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import DeviceInfo
+from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import (
     CoordinatorEntity,
     DataUpdateCoordinator,
@@ -229,6 +233,7 @@ _HEATING_CIRCUIT_INFO = (
     _temperature("heating_circuit", "reported_supply_temperature", "Vorlauftemperatur"),
 )
 WSB_FIELDS = _PUMP_SETTINGS + _HEATER_COUNTERS + _HEAT_PUMP_INFO + _HEATING_CIRCUIT_INFO
+_FIELD_KEYS = frozenset(field.key for field in WSB_FIELDS)
 
 
 def _menu(page: BeautifulSoup, label: str, *, parent: str | None = None) -> str:
@@ -358,6 +363,22 @@ class _ReportRoute:
     empty_polls: int = 0
 
 
+class _SavedReport(TypedDict):
+    path: str
+    fields: list[str]
+
+
+class _SavedRoutes(TypedDict):
+    endpoint: str
+    firmware: str
+    reports: dict[str, _SavedReport]
+
+
+def wsb_route_store(hass: HomeAssistant, entry_id: str) -> Store[_SavedRoutes]:
+    """Open the versioned discovery cache for a single WSB entry."""
+    return Store(hass, 1, f"{CONST.DOMAIN}.{entry_id}.wsb_routes", atomic_writes=True)
+
+
 class WsbWebifConnection(WebifConnection):
     """Count WSB export GETs on the wire, including client replays."""
 
@@ -403,6 +424,85 @@ class WsbWebifCoordinator(DataUpdateCoordinator[dict[str, int | float | str]]):
         self._routes: dict[tuple[str, str], _ReportRoute] = {}
         self._last_partial_poll: str | None = None
         self._shutdown_started = asyncio.Event()
+        self._route_store = (
+            wsb_route_store(hass, config_entry.entry_id) if config_entry else None
+        )
+        self._route_endpoint = (
+            sha256(config_entry.data[CONF.HOST].encode()).hexdigest()
+            if config_entry
+            else ""
+        )
+        self._route_cache_checked = False
+        self._saved_routes: _SavedRoutes | None = None
+
+    async def _restore_routes(self, firmware: str | None) -> None:
+        """Reuse discovered routes when this controller reports the same firmware."""
+        if self._route_store is None or self._route_cache_checked:
+            return
+        self._route_cache_checked = True
+        if firmware is None:
+            return
+        try:
+            data = await self._route_store.async_load()
+        except (
+            HomeAssistantError,
+            KeyError,
+            NotImplementedError,
+            OSError,
+            TypeError,
+        ) as err:
+            _LOGGER.debug("WSB WEM discovery cache unavailable (%s)", type(err).__name__)
+            return
+        if (
+            not isinstance(data, dict)
+            or data.get("endpoint") != self._route_endpoint
+            or data.get("firmware") != firmware
+            or not isinstance(reports := data.get("reports"), dict)
+        ):
+            return
+
+        routes = {}
+        for parent, child in _REPORT_KEYS:
+            report = reports.get(f"{parent}/{child}")
+            if (
+                not isinstance(report, dict)
+                or not isinstance(path := report.get("path"), str)
+                or not _EXPORT_LINK.fullmatch(path)
+                or "," not in path
+                or not isinstance(fields := report.get("fields"), list)
+                or not fields
+                or not all(
+                    isinstance(field, str) and field in _FIELD_KEYS for field in fields
+                )
+            ):
+                return
+            routes[parent, child] = _ReportRoute(path, frozenset(fields))
+        if len({route.path for route in routes.values()}) != len(_REPORT_KEYS):
+            return
+
+        self._routes = routes
+        self._saved_routes = data
+
+    async def _save_routes(self, values: dict[str, int | float | str]) -> None:
+        """Save only complete route discovery, without storing readings."""
+        if (
+            self._route_store is None
+            or self.controller_firmware is None
+            or _REPORT_KEYS - self._routes.keys()
+            or any(route.fields - values.keys() for route in self._routes.values())
+        ):
+            return
+        record: _SavedRoutes = {
+            "endpoint": self._route_endpoint,
+            "firmware": self.controller_firmware,
+            "reports": {
+                f"{parent}/{child}": {"path": route.path, "fields": sorted(route.fields)}
+                for (parent, child), route in self._routes.items()
+            },
+        }
+        if record != self._saved_routes:
+            await self._route_store.async_save(record)
+            self._saved_routes = record
 
     def _update_controller_firmware(self, firmware: str) -> None:
         if firmware == self.controller_firmware:
@@ -478,6 +578,9 @@ class WsbWebifCoordinator(DataUpdateCoordinator[dict[str, int | float | str]]):
             root = (
                 None if self._routes.keys() >= _REPORT_KEYS else await get_page(_ROOT)
             )
+            if root is not None:
+                await self._restore_routes(firmware)
+                expected.update({key: route.fields for key, route in self._routes.items()})
             await self._read_reports(get_page, root, values)
         except _REPORT_FAILURES as err:
             # Further requests after a transport failure can wait through the
@@ -515,6 +618,7 @@ class WsbWebifCoordinator(DataUpdateCoordinator[dict[str, int | float | str]]):
                 detail,
             )
         self._last_partial_poll = detail
+        await self._save_routes(values)
         return values
 
     async def _wait_for_export_render(self, delay: int) -> None:
